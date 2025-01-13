@@ -2,6 +2,7 @@ package authorization
 
 import (
 	"net"
+	"regexp"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -10,6 +11,25 @@ import (
 	"github.com/authelia/authelia/v4/internal/authentication"
 	"github.com/authelia/authelia/v4/internal/configuration/schema"
 )
+
+func TestLevelToString(t *testing.T) {
+	testCases := []struct {
+		have     Level
+		expected string
+	}{
+		{Bypass, "bypass"},
+		{OneFactor, "one_factor"},
+		{TwoFactor, "two_factor"},
+		{Denied, "deny"},
+		{99, "deny"},
+	}
+
+	for _, tc := range testCases {
+		t.Run("Expected_"+tc.expected, func(t *testing.T) {
+			assert.Equal(t, tc.expected, tc.have.String())
+		})
+	}
+}
 
 func TestShouldNotParseInvalidSubjects(t *testing.T) {
 	subjectsSchema := [][]string{{"groups:z"}, {"group:z", "users:b"}}
@@ -40,7 +60,7 @@ func TestShouldSplitDomainCorrectly(t *testing.T) {
 }
 
 func TestShouldParseRuleNetworks(t *testing.T) {
-	schemaNetworks := []schema.ACLNetwork{
+	schemaNetworks := []schema.AccessControlNetwork{
 		{
 			Name: "desktop",
 			Networks: []string{
@@ -85,7 +105,7 @@ func TestShouldParseRuleNetworks(t *testing.T) {
 }
 
 func TestShouldParseACLNetworks(t *testing.T) {
-	schemaNetworks := []schema.ACLNetwork{
+	schemaNetworks := []schema.AccessControlNetwork{
 		{
 			Name: "test",
 			Networks: []string{
@@ -184,7 +204,10 @@ func TestShouldParseACLNetworks(t *testing.T) {
 	assert.Equal(t, fourthNetwork, networksCacheMap["fec0::1/128"])
 }
 
-func TestShouldReturnCorrectValidationLevel(t *testing.T) {
+func TestIsAuthLevelSufficient(t *testing.T) {
+	assert.False(t, IsAuthLevelSufficient(authentication.NotAuthenticated, Denied))
+	assert.False(t, IsAuthLevelSufficient(authentication.OneFactor, Denied))
+	assert.False(t, IsAuthLevelSufficient(authentication.TwoFactor, Denied))
 	assert.True(t, IsAuthLevelSufficient(authentication.NotAuthenticated, Bypass))
 	assert.True(t, IsAuthLevelSufficient(authentication.OneFactor, Bypass))
 	assert.True(t, IsAuthLevelSufficient(authentication.TwoFactor, Bypass))
@@ -194,4 +217,226 @@ func TestShouldReturnCorrectValidationLevel(t *testing.T) {
 	assert.False(t, IsAuthLevelSufficient(authentication.NotAuthenticated, TwoFactor))
 	assert.False(t, IsAuthLevelSufficient(authentication.OneFactor, TwoFactor))
 	assert.True(t, IsAuthLevelSufficient(authentication.TwoFactor, TwoFactor))
+}
+
+func TestStringSliceToRegexpSlice(t *testing.T) {
+	testCases := []struct {
+		name     string
+		have     []string
+		expected []regexp.Regexp
+		err      string
+	}{
+		{
+			"ShouldNotParseBadRegex",
+			[]string{`\q`},
+			[]regexp.Regexp(nil),
+			"error parsing regexp: invalid escape sequence: `\\q`",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			actual, theError := stringSliceToRegexpSlice(tc.have)
+
+			assert.Equal(t, tc.expected, actual)
+
+			if tc.err == "" {
+				assert.NoError(t, theError)
+			} else {
+				assert.EqualError(t, theError, tc.err)
+			}
+		})
+	}
+}
+
+func TestSchemaNetworksToACL(t *testing.T) {
+	testCases := []struct {
+		name     string
+		have     []string
+		globals  map[string][]*net.IPNet
+		cache    map[string]*net.IPNet
+		expected []*net.IPNet
+	}{
+		{
+			"ShouldLoadFromCache",
+			[]string{"192.168.0.0/24"},
+			nil,
+			map[string]*net.IPNet{"192.168.0.0/24": MustParseCIDR("192.168.0.0/24")},
+			[]*net.IPNet{MustParseCIDR("192.168.0.0/24")},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.globals == nil {
+				tc.globals = map[string][]*net.IPNet{}
+			}
+
+			if tc.cache == nil {
+				tc.cache = map[string]*net.IPNet{}
+			}
+
+			actual := schemaNetworksToACL(tc.have, tc.globals, tc.cache)
+
+			assert.Equal(t, tc.expected, actual)
+		})
+	}
+}
+
+func TestIsOpenIDConnectMFA(t *testing.T) {
+	testCases := []struct {
+		name     string
+		have     *schema.Configuration
+		expected bool
+	}{
+		{
+			"ShouldReturnFalseNilConfig",
+			nil,
+			false,
+		},
+		{
+			"ShouldReturnFalseNilOIDC",
+			&schema.Configuration{
+				IdentityProviders: schema.IdentityProviders{
+					OIDC: nil,
+				},
+			},
+			false,
+		},
+		{
+			"ShouldReturnFalseNoClients",
+			&schema.Configuration{
+				IdentityProviders: schema.IdentityProviders{
+					OIDC: &schema.IdentityProvidersOpenIDConnect{
+						Clients: nil,
+					},
+				},
+			},
+			false,
+		},
+		{
+			"ShouldReturnFalseNoClients2FA",
+			&schema.Configuration{
+				IdentityProviders: schema.IdentityProviders{
+					OIDC: &schema.IdentityProvidersOpenIDConnect{
+						Clients: []schema.IdentityProvidersOpenIDConnectClient{
+							{
+								ID:                  "one",
+								AuthorizationPolicy: "one_factor",
+							},
+						},
+					},
+				},
+			},
+			false,
+		},
+		{
+			"ShouldReturnTrueClientsDirect2FA",
+			&schema.Configuration{
+				IdentityProviders: schema.IdentityProviders{
+					OIDC: &schema.IdentityProvidersOpenIDConnect{
+						Clients: []schema.IdentityProvidersOpenIDConnectClient{
+							{
+								ID:                  "one",
+								AuthorizationPolicy: "two_factor",
+							},
+						},
+					},
+				},
+			},
+			true,
+		},
+		{
+			"ShouldReturnTrueClientsIndirect2FADefault",
+			&schema.Configuration{
+				IdentityProviders: schema.IdentityProviders{
+					OIDC: &schema.IdentityProvidersOpenIDConnect{
+						AuthorizationPolicies: map[string]schema.IdentityProvidersOpenIDConnectPolicy{
+							"example": {
+								DefaultPolicy: "two_factor",
+							},
+						},
+						Clients: []schema.IdentityProvidersOpenIDConnectClient{
+							{
+								ID:                  "one",
+								AuthorizationPolicy: "example",
+							},
+						},
+					},
+				},
+			},
+			true,
+		},
+		{
+			"ShouldReturnTrueClientsIndirect2FADefault",
+			&schema.Configuration{
+				IdentityProviders: schema.IdentityProviders{
+					OIDC: &schema.IdentityProvidersOpenIDConnect{
+						AuthorizationPolicies: map[string]schema.IdentityProvidersOpenIDConnectPolicy{
+							"example": {
+								DefaultPolicy: "deny",
+								Rules: []schema.IdentityProvidersOpenIDConnectPolicyRule{
+									{
+										Policy: "two_factor",
+									},
+								},
+							},
+						},
+						Clients: []schema.IdentityProvidersOpenIDConnectClient{
+							{
+								ID:                  "one",
+								AuthorizationPolicy: "example",
+							},
+						},
+					},
+				},
+			},
+			true,
+		},
+		{
+			"ShouldReturnTrueClientsIndirect2FADefault",
+			&schema.Configuration{
+				IdentityProviders: schema.IdentityProviders{
+					OIDC: &schema.IdentityProvidersOpenIDConnect{
+						AuthorizationPolicies: map[string]schema.IdentityProvidersOpenIDConnectPolicy{
+							"example": {
+								DefaultPolicy: "deny",
+								Rules: []schema.IdentityProvidersOpenIDConnectPolicyRule{
+									{
+										Policy: "two_factor",
+									},
+								},
+							},
+						},
+						Clients: []schema.IdentityProvidersOpenIDConnectClient{
+							{
+								ID:                  "skip",
+								AuthorizationPolicy: "skip",
+							},
+							{
+								ID:                  "one",
+								AuthorizationPolicy: "example",
+							},
+						},
+					},
+				},
+			},
+			true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.expected, isOpenIDConnectMFA(tc.have))
+		})
+	}
+}
+
+func MustParseCIDR(input string) *net.IPNet {
+	_, out, err := net.ParseCIDR(input)
+	if err != nil {
+		panic(err)
+	}
+
+	return out
 }

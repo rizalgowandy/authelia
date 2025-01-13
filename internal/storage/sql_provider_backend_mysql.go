@@ -1,12 +1,13 @@
 package storage
 
 import (
-	"fmt"
+	"crypto/x509"
 	"time"
 
-	_ "github.com/go-sql-driver/mysql" // Load the MySQL Driver used in the connection string.
+	"github.com/go-sql-driver/mysql"
 
 	"github.com/authelia/authelia/v4/internal/configuration/schema"
+	"github.com/authelia/authelia/v4/internal/utils"
 )
 
 // MySQLProvider is a MySQL provider.
@@ -15,9 +16,9 @@ type MySQLProvider struct {
 }
 
 // NewMySQLProvider a MySQL provider.
-func NewMySQLProvider(config *schema.Configuration) (provider *MySQLProvider) {
+func NewMySQLProvider(config *schema.Configuration, caCertPool *x509.CertPool) (provider *MySQLProvider) {
 	provider = &MySQLProvider{
-		SQLProvider: NewSQLProvider(config, providerMySQL, providerMySQL, dataSourceNameMySQL(*config.Storage.MySQL)),
+		SQLProvider: NewSQLProvider(config, providerMySQL, providerMySQL, dsnMySQL(config.Storage.MySQL, caCertPool)),
 	}
 
 	// All providers have differing SELECT existing table statements.
@@ -29,22 +30,25 @@ func NewMySQLProvider(config *schema.Configuration) (provider *MySQLProvider) {
 	return provider
 }
 
-func dataSourceNameMySQL(config schema.MySQLStorageConfiguration) (dataSourceName string) {
-	dataSourceName = fmt.Sprintf("%s:%s", config.Username, config.Password)
+func dsnMySQL(config *schema.StorageMySQL, caCertPool *x509.CertPool) (dataSourceName string) {
+	dsnConfig := mysql.NewConfig()
 
-	if dataSourceName != "" {
-		dataSourceName += "@"
+	dsnConfig.Net = config.Address.Network()
+	dsnConfig.Addr = config.Address.NetworkAddress()
+
+	if config.TLS != nil {
+		_ = mysql.RegisterTLSConfig("storage", utils.NewTLSConfig(config.TLS, caCertPool))
+
+		dsnConfig.TLSConfig = "storage"
 	}
 
-	address := config.Host
-	if config.Port > 0 {
-		address += fmt.Sprintf(":%d", config.Port)
-	}
+	dsnConfig.DBName = config.Database
+	dsnConfig.User = config.Username
+	dsnConfig.Passwd = config.Password
+	dsnConfig.Timeout = config.Timeout
+	dsnConfig.MultiStatements = true
+	dsnConfig.ParseTime = true
+	dsnConfig.Loc = time.Local
 
-	dataSourceName += fmt.Sprintf("tcp(%s)/%s", address, config.Database)
-
-	dataSourceName += "?"
-	dataSourceName += fmt.Sprintf("timeout=%ds&multiStatements=true&parseTime=true", int32(config.Timeout/time.Second))
-
-	return dataSourceName
+	return dsnConfig.FormatDSN()
 }

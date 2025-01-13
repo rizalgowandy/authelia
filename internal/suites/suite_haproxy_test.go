@@ -11,15 +11,17 @@ type HAProxySuite struct {
 }
 
 func NewHAProxySuite() *HAProxySuite {
-	return &HAProxySuite{RodSuite: new(RodSuite)}
+	return &HAProxySuite{
+		RodSuite: NewRodSuite(haproxySuiteName),
+	}
 }
 
-func (s *HAProxySuite) TestOneFactorScenario() {
-	suite.Run(s.T(), NewOneFactorScenario())
+func (s *HAProxySuite) Test1FAScenario() {
+	suite.Run(s.T(), New1FAScenario())
 }
 
-func (s *HAProxySuite) TestTwoFactorScenario() {
-	suite.Run(s.T(), NewTwoFactorScenario())
+func (s *HAProxySuite) Test2FATOTPScenario() {
+	suite.Run(s.T(), New2FATOTPScenario())
 }
 
 func (s *HAProxySuite) TestCustomHeaders() {

@@ -5,41 +5,50 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"os"
 	"strings"
+	"text/tabwriter"
 
 	"github.com/spf13/cobra"
+	"github.com/valyala/fasthttp"
 
 	"github.com/authelia/authelia/v4/internal/authorization"
-	"github.com/authelia/authelia/v4/internal/configuration"
-	"github.com/authelia/authelia/v4/internal/configuration/schema"
 	"github.com/authelia/authelia/v4/internal/configuration/validator"
 )
 
-func newAccessControlCommand() (cmd *cobra.Command) {
+func newAccessControlCommand(ctx *CmdCtx) (cmd *cobra.Command) {
 	cmd = &cobra.Command{
-		Use:   "access-control",
-		Short: "Helpers for the access control system",
+		Use:     "access-control",
+		Short:   cmdAutheliaAccessControlShort,
+		Long:    cmdAutheliaAccessControlLong,
+		Example: cmdAutheliaAccessControlExample,
+
+		DisableAutoGenTag: true,
 	}
 
 	cmd.AddCommand(
-		newAccessControlCheckCommand(),
+		newAccessControlCheckCommand(ctx),
 	)
 
 	return cmd
 }
 
-func newAccessControlCheckCommand() (cmd *cobra.Command) {
+func newAccessControlCheckCommand(ctx *CmdCtx) (cmd *cobra.Command) {
 	cmd = &cobra.Command{
-		Use:   "check-policy",
-		Short: "Checks a request against the access control rules to determine what policy would be applied",
-		Long:  accessControlPolicyCheckLong,
-		RunE:  accessControlCheckRunE,
+		Use:     "check-policy",
+		Short:   cmdAutheliaAccessControlCheckPolicyShort,
+		Long:    cmdAutheliaAccessControlCheckPolicyLong,
+		Example: cmdAutheliaAccessControlCheckPolicyExample,
+		PreRunE: ctx.ChainRunE(
+			ctx.HelperConfigLoadRunE,
+		),
+		RunE: ctx.AccessControlCheckRunE,
+
+		DisableAutoGenTag: true,
 	}
 
-	cmdWithConfigFlags(cmd, false, []string{"config.yml"})
-
 	cmd.Flags().String("url", "", "the url of the object")
-	cmd.Flags().String("method", "GET", "the HTTP method of the object")
+	cmd.Flags().String("method", fasthttp.MethodGet, "the HTTP method of the object")
 	cmd.Flags().String("username", "", "the username of the subject")
 	cmd.Flags().StringSlice("groups", nil, "the groups of the subject")
 	cmd.Flags().String("ip", "", "the ip of the subject")
@@ -48,38 +57,14 @@ func newAccessControlCheckCommand() (cmd *cobra.Command) {
 	return cmd
 }
 
-func accessControlCheckRunE(cmd *cobra.Command, _ []string) (err error) {
-	configs, err := cmd.Flags().GetStringSlice("config")
-	if err != nil {
-		return err
+func (ctx *CmdCtx) AccessControlCheckRunE(cmd *cobra.Command, _ []string) (err error) {
+	validator.ValidateAccessControl(ctx.config, ctx.cconfig.validator)
+
+	if ctx.cconfig.validator.HasErrors() {
+		return errors.New("failed to execute command due to errors in the configuration")
 	}
 
-	sources := make([]configuration.Source, len(configs)+2)
-
-	for i, path := range configs {
-		sources[i] = configuration.NewYAMLFileSource(path)
-	}
-
-	sources[0+len(configs)] = configuration.NewEnvironmentSource(configuration.DefaultEnvPrefix, configuration.DefaultEnvDelimiter)
-	sources[1+len(configs)] = configuration.NewSecretsSource(configuration.DefaultEnvPrefix, configuration.DefaultEnvDelimiter)
-
-	val := schema.NewStructValidator()
-
-	accessControlConfig := &schema.Configuration{}
-
-	if _, err = configuration.LoadAdvanced(val, "access_control", &accessControlConfig.AccessControl, sources...); err != nil {
-		return err
-	}
-
-	v := schema.NewStructValidator()
-
-	validator.ValidateAccessControl(accessControlConfig, v)
-
-	if v.HasErrors() || v.HasWarnings() {
-		return errors.New("your configuration has errors")
-	}
-
-	authorizer := authorization.NewAuthorizer(accessControlConfig)
+	authorizer := authorization.NewAuthorizer(ctx.config)
 
 	subject, object, err := getSubjectAndObjectFromFlags(cmd)
 	if err != nil {
@@ -89,7 +74,7 @@ func accessControlCheckRunE(cmd *cobra.Command, _ []string) (err error) {
 	results := authorizer.GetRuleMatchResults(subject, object)
 
 	if len(results) == 0 {
-		fmt.Printf("\nThe default policy '%s' will be applied to ALL requests as no rules are configured.\n\n", accessControlConfig.AccessControl.DefaultPolicy)
+		fmt.Printf("\nThe default policy '%s' will be applied to ALL requests as no rules are configured.\n\n", ctx.config.AccessControl.DefaultPolicy)
 
 		return nil
 	}
@@ -99,7 +84,7 @@ func accessControlCheckRunE(cmd *cobra.Command, _ []string) (err error) {
 		return err
 	}
 
-	accessControlCheckWriteOutput(object, subject, results, accessControlConfig.AccessControl.DefaultPolicy, verbose)
+	accessControlCheckWriteOutput(object, subject, results, ctx.config.AccessControl.DefaultPolicy, verbose)
 
 	return nil
 }
@@ -133,7 +118,9 @@ func accessControlCheckWriteObjectSubject(object authorization.Object, subject a
 func accessControlCheckWriteOutput(object authorization.Object, subject authorization.Subject, results []authorization.RuleMatchResult, defaultPolicy string, verbose bool) {
 	accessControlCheckWriteObjectSubject(object, subject)
 
-	fmt.Printf("  #\tDomain\tResource\tMethod\tNetwork\tSubject\n")
+	w := tabwriter.NewWriter(os.Stdout, 1, 1, 4, ' ', 0)
+
+	_, _ = fmt.Fprintln(w, "  #\tDomain\tResource\tQuery\tMethod\tNetwork\tSubject")
 
 	var (
 		appliedPos int
@@ -151,26 +138,27 @@ func accessControlCheckWriteOutput(object authorization.Object, subject authoriz
 		switch {
 		case result.IsMatch() && !result.Skipped:
 			appliedPos, applied = i+1, result
-
-			fmt.Printf("* %d\t%s\t%s\t\t%s\t%s\t%s\n", i+1, hitMissMay(result.MatchDomain), hitMissMay(result.MatchResources), hitMissMay(result.MatchMethods), hitMissMay(result.MatchNetworks), hitMissMay(result.MatchSubjects, result.MatchSubjectsExact))
+			_, _ = fmt.Fprintf(w, "* %d\t%s\t%s\t%s\t%s\t%s\t%s\n", i+1, hitMissMay(result.MatchDomain), hitMissMay(result.MatchResources), hitMissMay(result.MatchQuery), hitMissMay(result.MatchMethods), hitMissMay(result.MatchNetworks), hitMissMay(result.MatchSubjects, result.MatchSubjectsExact))
 		case result.IsPotentialMatch() && !result.Skipped:
 			if potentialPos == 0 {
 				potentialPos, potential = i+1, result
 			}
 
-			fmt.Printf("~ %d\t%s\t%s\t\t%s\t%s\t%s\n", i+1, hitMissMay(result.MatchDomain), hitMissMay(result.MatchResources), hitMissMay(result.MatchMethods), hitMissMay(result.MatchNetworks), hitMissMay(result.MatchSubjects, result.MatchSubjectsExact))
+			_, _ = fmt.Fprintf(w, "~ %d\t%s\t%s\t%s\t%s\t%s\t%s\n", i+1, hitMissMay(result.MatchDomain), hitMissMay(result.MatchResources), hitMissMay(result.MatchQuery), hitMissMay(result.MatchMethods), hitMissMay(result.MatchNetworks), hitMissMay(result.MatchSubjects, result.MatchSubjectsExact))
 		default:
-			fmt.Printf("  %d\t%s\t%s\t\t%s\t%s\t%s\n", i+1, hitMissMay(result.MatchDomain), hitMissMay(result.MatchResources), hitMissMay(result.MatchMethods), hitMissMay(result.MatchNetworks), hitMissMay(result.MatchSubjects, result.MatchSubjectsExact))
+			_, _ = fmt.Fprintf(w, "  %d\t%s\t%s\t%s\t%s\t%s\t%s\n", i+1, hitMissMay(result.MatchDomain), hitMissMay(result.MatchResources), hitMissMay(result.MatchQuery), hitMissMay(result.MatchMethods), hitMissMay(result.MatchNetworks), hitMissMay(result.MatchSubjects, result.MatchSubjectsExact))
 		}
 	}
 
+	_ = w.Flush()
+
 	switch {
 	case appliedPos != 0 && (potentialPos == 0 || (potentialPos > appliedPos)):
-		fmt.Printf("\nThe policy '%s' from rule #%d will be applied to this request.\n\n", authorization.LevelToPolicy(applied.Rule.Policy), appliedPos)
+		fmt.Printf("\nThe policy '%s' from rule #%d will be applied to this request.\n\n", applied.Rule.Policy, appliedPos)
 	case potentialPos != 0 && appliedPos != 0:
-		fmt.Printf("\nThe policy '%s' from rule #%d will potentially be applied to this request. If not policy '%s' from rule #%d will be.\n\n", authorization.LevelToPolicy(potential.Rule.Policy), potentialPos, authorization.LevelToPolicy(applied.Rule.Policy), appliedPos)
+		fmt.Printf("\nThe policy '%s' from rule #%d will potentially be applied to this request. If not policy '%s' from rule #%d will be.\n\n", potential.Rule.Policy, potentialPos, applied.Rule.Policy, appliedPos)
 	case potentialPos != 0:
-		fmt.Printf("\nThe policy '%s' from rule #%d will potentially be applied to this request. Otherwise the policy '%s' from the default policy will be.\n\n", authorization.LevelToPolicy(potential.Rule.Policy), potentialPos, defaultPolicy)
+		fmt.Printf("\nThe policy '%s' from rule #%d will potentially be applied to this request. Otherwise the policy '%s' from the default policy will be.\n\n", potential.Rule.Policy, potentialPos, defaultPolicy)
 	default:
 		fmt.Printf("\nThe policy '%s' from the default policy will be applied to this request as no rules matched the request.\n\n", defaultPolicy)
 	}
@@ -203,7 +191,7 @@ func getSubjectAndObjectFromFlags(cmd *cobra.Command) (subject authorization.Sub
 		return subject, object, err
 	}
 
-	parsedURL, err := url.Parse(requestURL)
+	parsedURL, err := url.ParseRequestURI(requestURL)
 	if err != nil {
 		return subject, object, err
 	}

@@ -1,62 +1,93 @@
-import React, { ReactNode } from "react";
+import React, { ReactNode, useEffect } from "react";
 
-import { Grid, makeStyles, Container, Typography, Link } from "@material-ui/core";
-import { grey } from "@material-ui/core/colors";
+import { AppBar, Box, Container, Theme, Toolbar, Typography } from "@mui/material";
+import Grid from "@mui/material/Grid2";
+import makeStyles from "@mui/styles/makeStyles";
+import { useTranslation } from "react-i18next";
 
-import { ReactComponent as UserSvg } from "@assets/images/user.svg";
+import UserSvg from "@assets/images/user.svg?react";
+import AccountSettingsMenu from "@components/AccountSettingsMenu";
+import Brand from "@components/Brand";
+import PrivacyPolicyDrawer from "@components/PrivacyPolicyDrawer";
+import TypographyWithTooltip from "@components/TypographyWithTooltip";
+import { UserInfo } from "@models/UserInfo";
 import { getLogoOverride } from "@utils/Configuration";
 
 export interface Props {
     id?: string;
     children?: ReactNode;
-    title?: string;
-    showBrand?: boolean;
+    title?: string | null;
+    titleTooltip?: string | null;
+    subtitle?: string | null;
+    subtitleTooltip?: string | null;
+    userInfo?: UserInfo;
 }
 
 const LoginLayout = function (props: Props) {
-    const style = useStyles();
+    const { t: translate } = useTranslation();
+
+    const styles = useStyles();
+
     const logo = getLogoOverride() ? (
-        <img src="./static/media/logo.png" alt="Logo" className={style.icon} />
+        <img src="./static/media/logo.png" alt="Logo" className={styles.icon} />
     ) : (
-        <UserSvg className={style.icon} />
+        <UserSvg className={styles.icon} />
     );
+
+    useEffect(() => {
+        document.title = `${translate("Login")} - Authelia`;
+    }, [translate]);
+
     return (
-        <Grid id={props.id} className={style.root} container spacing={0} alignItems="center" justifyContent="center">
-            <Container maxWidth="xs" className={style.rootContainer}>
-                <Grid container>
-                    <Grid item xs={12}>
-                        {logo}
-                    </Grid>
-                    {props.title ? (
-                        <Grid item xs={12}>
-                            <Typography variant="h5" className={style.title}>
-                                {props.title}
-                            </Typography>
+        <Box>
+            <AppBar position="static" color="transparent" elevation={0}>
+                <Toolbar variant="regular">
+                    <Typography style={{ flexGrow: 1 }} />
+                    {props.userInfo ? <AccountSettingsMenu userInfo={props.userInfo} /> : null}
+                </Toolbar>
+            </AppBar>
+            <Grid
+                id={props.id}
+                className={styles.root}
+                container
+                spacing={0}
+                alignItems="center"
+                justifyContent="center"
+            >
+                <Container maxWidth="xs" className={styles.rootContainer}>
+                    <Grid container>
+                        <Grid size={{ xs: 12 }}>{logo}</Grid>
+                        {props.title ? (
+                            <Grid size={{ xs: 12 }}>
+                                <TypographyWithTooltip
+                                    variant={"h5"}
+                                    value={props.title}
+                                    tooltip={props.titleTooltip !== null ? props.titleTooltip : undefined}
+                                />
+                            </Grid>
+                        ) : null}
+                        {props.subtitle ? (
+                            <Grid size={{ xs: 12 }}>
+                                <TypographyWithTooltip
+                                    variant={"h6"}
+                                    value={props.subtitle}
+                                    tooltip={props.subtitleTooltip !== null ? props.subtitleTooltip : undefined}
+                                />
+                            </Grid>
+                        ) : null}
+                        <Grid size={{ xs: 12 }} className={styles.body}>
+                            {props.children}
                         </Grid>
-                    ) : null}
-                    <Grid item xs={12} className={style.body}>
-                        {props.children}
+                        <Brand />
                     </Grid>
-                    {props.showBrand ? (
-                        <Grid item xs={12}>
-                            <Link
-                                href="https://github.com/authelia/authelia"
-                                target="_blank"
-                                className={style.poweredBy}
-                            >
-                                Powered by Authelia
-                            </Link>
-                        </Grid>
-                    ) : null}
-                </Grid>
-            </Container>
-        </Grid>
+                </Container>
+                <PrivacyPolicyDrawer />
+            </Grid>
+        </Box>
     );
 };
 
-export default LoginLayout;
-
-const useStyles = makeStyles((theme) => ({
+const useStyles = makeStyles((theme: Theme) => ({
     root: {
         minHeight: "90vh",
         textAlign: "center",
@@ -66,6 +97,7 @@ const useStyles = makeStyles((theme) => ({
         paddingRight: 32,
     },
     title: {},
+    subtitle: {},
     icon: {
         margin: theme.spacing(),
         width: "64px",
@@ -76,8 +108,6 @@ const useStyles = makeStyles((theme) => ({
         paddingTop: theme.spacing(),
         paddingBottom: theme.spacing(),
     },
-    poweredBy: {
-        fontSize: "0.7em",
-        color: grey[500],
-    },
 }));
+
+export default LoginLayout;

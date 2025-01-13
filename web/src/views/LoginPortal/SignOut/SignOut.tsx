@@ -1,28 +1,30 @@
-import React, { useEffect, useCallback, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 
-import { Typography, makeStyles } from "@material-ui/core";
+import { Theme, Typography } from "@mui/material";
+import makeStyles from "@mui/styles/makeStyles";
 import { useTranslation } from "react-i18next";
 import { Navigate } from "react-router-dom";
 
 import { IndexRoute } from "@constants/Routes";
+import { RedirectionURL } from "@constants/SearchParams";
 import { useIsMountedRef } from "@hooks/Mounted";
 import { useNotifications } from "@hooks/NotificationsContext";
-import { useRedirectionURL } from "@hooks/RedirectionURL";
+import { useQueryParam } from "@hooks/QueryParam";
 import { useRedirector } from "@hooks/Redirector";
-import LoginLayout from "@layouts/LoginLayout";
+import MinimalLayout from "@layouts/MinimalLayout";
 import { signOut } from "@services/SignOut";
 
 export interface Props {}
 
 const SignOut = function (props: Props) {
     const mounted = useIsMountedRef();
-    const style = useStyles();
+    const styles = useStyles();
     const { createErrorNotification } = useNotifications();
-    const redirectionURL = useRedirectionURL();
+    const redirectionURL = useQueryParam(RedirectionURL);
     const redirector = useRedirector();
     const [timedOut, setTimedOut] = useState(false);
     const [safeRedirect, setSafeRedirect] = useState(false);
-    const { t: translate } = useTranslation("Portal");
+    const { t: translate } = useTranslation();
 
     const doSignOut = useCallback(async () => {
         try {
@@ -55,15 +57,15 @@ const SignOut = function (props: Props) {
     }
 
     return (
-        <LoginLayout title={translate("Sign out")}>
-            <Typography className={style.typo}>{translate("You're being signed out and redirected")}...</Typography>
-        </LoginLayout>
+        <MinimalLayout title={translate("Sign out")}>
+            <Typography className={styles.typo}>{translate("You're being signed out and redirected")}...</Typography>
+        </MinimalLayout>
     );
 };
 
 export default SignOut;
 
-const useStyles = makeStyles((theme) => ({
+const useStyles = makeStyles((theme: Theme) => ({
     typo: {
         padding: theme.spacing(),
     },

@@ -13,8 +13,7 @@ import (
 )
 
 func TestShouldGenerateConfiguration(t *testing.T) {
-	dir, err := os.MkdirTemp("", "authelia-config")
-	assert.NoError(t, err)
+	dir := t.TempDir()
 
 	cfg := filepath.Join(dir, "config.yml")
 
@@ -26,13 +25,29 @@ func TestShouldGenerateConfiguration(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestNotShouldGenerateConfigurationIfExists(t *testing.T) {
+	dir := t.TempDir()
+
+	cfg := filepath.Join(dir, "config.yml")
+
+	created, err := EnsureConfigurationExists(cfg)
+	assert.NoError(t, err)
+	assert.True(t, created)
+
+	created, err = EnsureConfigurationExists(cfg)
+	assert.NoError(t, err)
+	assert.False(t, created)
+
+	_, err = os.Stat(cfg)
+	assert.NoError(t, err)
+}
+
 func TestShouldNotGenerateConfigurationOnFSAccessDenied(t *testing.T) {
 	if runtime.GOOS == constWindows {
 		t.Skip("skipping test due to being on windows")
 	}
 
-	dir, err := os.MkdirTemp("", "authelia-config")
-	assert.NoError(t, err)
+	dir := t.TempDir()
 
 	assert.NoError(t, os.Mkdir(filepath.Join(dir, "zero"), 0000))
 
@@ -44,8 +59,7 @@ func TestShouldNotGenerateConfigurationOnFSAccessDenied(t *testing.T) {
 }
 
 func TestShouldNotGenerateConfiguration(t *testing.T) {
-	dir, err := os.MkdirTemp("", "authelia-config")
-	assert.NoError(t, err)
+	dir := t.TempDir()
 
 	cfg := filepath.Join(dir, "..", "not-a-dir", "config.yml")
 

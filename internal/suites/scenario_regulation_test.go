@@ -16,13 +16,12 @@ type RegulationScenario struct {
 
 func NewRegulationScenario() *RegulationScenario {
 	return &RegulationScenario{
-		RodSuite: new(RodSuite),
+		RodSuite: NewRodSuite(""),
 	}
 }
 
 func (s *RegulationScenario) SetupSuite() {
-	browser, err := StartRod()
-
+	browser, err := NewRodSession(RodSessionWithCredentials(s))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -55,31 +54,31 @@ func (s *RegulationScenario) TestShouldBanUserAfterTooManyAttempt() {
 		s.collectScreenshot(ctx.Err(), s.Page)
 	}()
 
-	s.doVisitLoginPage(s.T(), s.Context(ctx), "")
+	s.doVisitLoginPage(s.T(), s.Context(ctx), BaseDomain, "")
 	s.doFillLoginPageAndClick(s.T(), s.Context(ctx), "john", "bad-password", false)
-	s.verifyNotificationDisplayed(s.T(), s.Context(ctx), "Incorrect username or password.")
+	s.verifyNotificationDisplayed(s.T(), s.Context(ctx), "Incorrect username or password")
 
 	for i := 0; i < 3; i++ {
-		err := s.WaitElementLocatedByCSSSelector(s.T(), s.Context(ctx), "password-textfield").Input("bad-password")
+		err := s.WaitElementLocatedByID(s.T(), s.Context(ctx), "password-textfield").Input("bad-password")
 		require.NoError(s.T(), err)
-		err = s.WaitElementLocatedByCSSSelector(s.T(), s.Context(ctx), "sign-in-button").Click("left")
+		err = s.WaitElementLocatedByID(s.T(), s.Context(ctx), "sign-in-button").Click("left", 1)
 		require.NoError(s.T(), err)
 	}
 
 	// Enter the correct password and test the regulation lock out.
-	err := s.WaitElementLocatedByCSSSelector(s.T(), s.Context(ctx), "password-textfield").Input("password")
+	err := s.WaitElementLocatedByID(s.T(), s.Context(ctx), "password-textfield").Input("password")
 	require.NoError(s.T(), err)
-	err = s.WaitElementLocatedByCSSSelector(s.T(), s.Context(ctx), "sign-in-button").Click("left")
+	err = s.WaitElementLocatedByID(s.T(), s.Context(ctx), "sign-in-button").Click("left", 1)
 	require.NoError(s.T(), err)
-	s.verifyNotificationDisplayed(s.T(), s.Context(ctx), "Incorrect username or password.")
+	s.verifyNotificationDisplayed(s.T(), s.Context(ctx), "Incorrect username or password")
 
 	s.verifyIsFirstFactorPage(s.T(), s.Context(ctx))
 	time.Sleep(10 * time.Second)
 
 	// Enter the correct password and test a successful login.
-	err = s.WaitElementLocatedByCSSSelector(s.T(), s.Context(ctx), "password-textfield").Input("password")
+	err = s.WaitElementLocatedByID(s.T(), s.Context(ctx), "password-textfield").Input("password")
 	require.NoError(s.T(), err)
-	err = s.WaitElementLocatedByCSSSelector(s.T(), s.Context(ctx), "sign-in-button").Click("left")
+	err = s.WaitElementLocatedByID(s.T(), s.Context(ctx), "sign-in-button").Click("left", 1)
 	require.NoError(s.T(), err)
 	s.verifyIsSecondFactorPage(s.T(), s.Context(ctx))
 }

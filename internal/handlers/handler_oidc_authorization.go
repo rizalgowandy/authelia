@@ -2,151 +2,218 @@ package handlers
 
 import (
 	"errors"
-	"fmt"
 	"net/http"
-	"strings"
+	"net/url"
 	"time"
 
-	"github.com/ory/fosite"
+	oauthelia2 "authelia.com/provider/oauth2"
 
+	"github.com/authelia/authelia/v4/internal/authentication"
+	"github.com/authelia/authelia/v4/internal/authorization"
 	"github.com/authelia/authelia/v4/internal/middlewares"
+	"github.com/authelia/authelia/v4/internal/model"
 	"github.com/authelia/authelia/v4/internal/oidc"
 	"github.com/authelia/authelia/v4/internal/session"
 )
 
-func oidcAuthorization(ctx *middlewares.AutheliaCtx, rw http.ResponseWriter, r *http.Request) {
+// OpenIDConnectAuthorization handles GET/POST requests to the OpenID Connect 1.0 Authorization endpoint.
+//
+// https://openid.net/specs/openid-connect-core-1_0.html#AuthorizationEndpoint
+//
+//nolint:gocyclo
+func OpenIDConnectAuthorization(ctx *middlewares.AutheliaCtx, rw http.ResponseWriter, r *http.Request) {
 	var (
-		requester fosite.AuthorizeRequester
-		responder fosite.AuthorizeResponder
-		client    *oidc.InternalClient
+		requester oauthelia2.AuthorizeRequester
+		responder oauthelia2.AuthorizeResponder
+		client    oidc.Client
+		policy    oidc.ClientAuthorizationPolicy
 		authTime  time.Time
-		issuer    string
+		issuer    *url.URL
 		err       error
 	)
 
-	if requester, err = ctx.Providers.OpenIDConnect.Fosite.NewAuthorizeRequest(ctx, r); err != nil {
-		rfc := fosite.ErrorToRFC6749Error(err)
+	requester, err = ctx.Providers.OpenIDConnect.NewAuthorizeRequest(ctx, r)
 
-		ctx.Logger.Errorf("Authorization Request failed with error: %+v", rfc)
+	if requester != nil && requester.GetResponseMode() == oidc.ResponseModeFormPost {
+		ctx.SetUserValue(middlewares.UserValueKeyOpenIDConnectResponseModeFormPost, true)
+	}
 
-		ctx.Providers.OpenIDConnect.Fosite.WriteAuthorizeError(rw, requester, err)
+	if err != nil {
+		ctx.Logger.Errorf("Authorization Request failed with error: %s", oauthelia2.ErrorToDebugRFC6749Error(err))
+
+		ctx.Providers.OpenIDConnect.WriteAuthorizeError(ctx, rw, requester, err)
 
 		return
+	}
+
+	if requester.GetResponseMode() == oidc.ResponseModeFormPost {
+		ctx.SetUserValue(middlewares.UserValueKeyOpenIDConnectResponseModeFormPost, true)
 	}
 
 	clientID := requester.GetClient().GetID()
 
 	ctx.Logger.Debugf("Authorization Request with id '%s' on client with id '%s' is being processed", requester.GetID(), clientID)
 
-	if client, err = ctx.Providers.OpenIDConnect.Store.GetInternalClient(clientID); err != nil {
-		if errors.Is(err, fosite.ErrNotFound) {
+	if client, err = ctx.Providers.OpenIDConnect.GetRegisteredClient(ctx, clientID); err != nil {
+		if errors.Is(err, oauthelia2.ErrNotFound) {
 			ctx.Logger.Errorf("Authorization Request with id '%s' on client with id '%s' could not be processed: client was not found", requester.GetID(), clientID)
 		} else {
-			ctx.Logger.Errorf("Authorization Request with id '%s' on client with id '%s' could not be processed: failed to find client: %+v", requester.GetID(), clientID, err)
+			ctx.Logger.Errorf("Authorization Request with id '%s' on client with id '%s' could not be processed: failed to find client: %s", requester.GetID(), clientID, oauthelia2.ErrorToDebugRFC6749Error(err))
 		}
 
-		ctx.Providers.OpenIDConnect.Fosite.WriteAuthorizeError(rw, requester, err)
+		ctx.Providers.OpenIDConnect.WriteAuthorizeError(ctx, rw, requester, err)
 
 		return
 	}
 
-	if issuer, err = ctx.ExternalRootURL(); err != nil {
-		ctx.Logger.Errorf("Authorization Request with id '%s' on client with id '%s' could not be processed: error occurred determining issuer: %+v", requester.GetID(), clientID, err)
+	policy = client.GetAuthorizationPolicy()
 
-		ctx.Providers.OpenIDConnect.Fosite.WriteAuthorizeError(rw, requester, fosite.ErrServerError.WithHint("Could not determine issuer."))
+	if !oidc.IsPushedAuthorizedRequest(requester, ctx.Providers.OpenIDConnect.GetPushedAuthorizeRequestURIPrefix(ctx)) {
+		if err = client.ValidateResponseModePolicy(requester); err != nil {
+			ctx.Logger.Errorf("Authorization Request with id '%s' on client with id '%s' using policy '%s' failed to validate the Response Mode: %s", requester.GetID(), client.GetID(), policy.Name, oauthelia2.ErrorToDebugRFC6749Error(err))
+
+			ctx.Providers.OpenIDConnect.WriteAuthorizeError(ctx, rw, requester, err)
+
+			return
+		}
+	}
+
+	var (
+		details     *authentication.UserDetails
+		userSession session.UserSession
+		consent     *model.OAuth2ConsentSession
+		handled     bool
+	)
+
+	if userSession, err = ctx.GetSession(); err != nil {
+		ctx.Logger.Errorf("Authorization Request with id '%s' on client with id '%s' using policy '%s' could not be processed: error occurred obtaining session information: %+v", requester.GetID(), client.GetID(), policy.Name, err)
+
+		ctx.Providers.OpenIDConnect.WriteAuthorizeError(ctx, rw, requester, oauthelia2.ErrServerError.WithHint("Could not obtain the user session."))
 
 		return
 	}
 
-	userSession := ctx.GetSession()
+	if requester.GetRequestForm().Get(oidc.FormParameterPrompt) == oidc.PromptNone {
+		if userSession.IsAnonymous() {
+			ctx.Logger.Errorf("Authorization Request with id '%s' on client with id '%s' using policy '%s' could not be processed: the 'prompt' type of 'none' was requested but the user is not logged in", requester.GetID(), client.GetID(), policy.Name)
 
-	requestedScopes := requester.GetRequestedScopes()
-	requestedAudience := requester.GetRequestedAudience()
+			ctx.Providers.OpenIDConnect.WriteAuthorizeError(ctx, rw, requester, oauthelia2.ErrLoginRequired)
 
-	isAuthInsufficient := !client.IsAuthenticationLevelSufficient(userSession.AuthenticationLevel)
+			return
+		}
 
-	if isAuthInsufficient || (isConsentMissing(userSession.OIDCWorkflowSession, requestedScopes, requestedAudience)) {
-		oidcAuthorizeHandleAuthorizationOrConsentInsufficient(ctx, userSession, client, isAuthInsufficient, rw, r, requester, issuer)
+		if client.GetConsentPolicy().Mode == oidc.ClientConsentModeExplicit {
+			ctx.Logger.Errorf("Authorization Request with id '%s' on client with id '%s' using policy '%s' could not be processed: the 'prompt' type of 'none' was requested but client is configured to require explicit consent", requester.GetID(), client.GetID(), policy.Name)
+
+			ctx.Providers.OpenIDConnect.WriteAuthorizeError(ctx, rw, requester, oauthelia2.ErrConsentRequired)
+
+			return
+		}
+	}
+
+	issuer = ctx.RootURL()
+
+	if consent, handled = handleOIDCAuthorizationConsent(ctx, issuer, client, userSession, rw, r, requester); handled {
+		return
+	}
+
+	if details, err = ctx.Providers.UserProvider.GetDetails(userSession.Username); err != nil {
+		ctx.Logger.WithError(err).Errorf("Authorization Request with id '%s' on client with id '%s' using policy '%s' could not be processed: error occurred retrieving user details for '%s' from the backend", requester.GetID(), client.GetID(), policy.Name, userSession.Username)
+
+		ctx.Providers.OpenIDConnect.WriteAuthorizeError(ctx, rw, requester, oauthelia2.ErrServerError.WithHint("Could not obtain the users details."))
 
 		return
 	}
 
-	extraClaims := oidcGrantRequests(requester, requestedScopes, requestedAudience, &userSession)
+	extraClaims := oidcGrantRequests(requester, consent, details)
 
-	workflowCreated := time.Unix(userSession.OIDCWorkflowSession.CreatedTimestamp, 0)
+	if authTime, err = userSession.AuthenticatedTime(client.GetAuthorizationPolicyRequiredLevel(authorization.Subject{Username: details.Username, Groups: details.Groups, IP: ctx.RemoteIP()})); err != nil {
+		ctx.Logger.Errorf("Authorization Request with id '%s' on client with id '%s' using policy '%s' could not be processed: error occurred checking authentication time: %+v", requester.GetID(), client.GetID(), policy.Name, err)
 
-	userSession.OIDCWorkflowSession = nil
-
-	if err = ctx.SaveSession(userSession); err != nil {
-		ctx.Logger.Errorf("Authorization Request with id '%s' on client with id '%s' could not be processed: error occurred saving session: %+v", requester.GetID(), client.GetID(), err)
-
-		ctx.Providers.OpenIDConnect.Fosite.WriteAuthorizeError(rw, requester, fosite.ErrServerError.WithHint("Could not save the session."))
+		ctx.Providers.OpenIDConnect.WriteAuthorizeError(ctx, rw, requester, oauthelia2.ErrServerError.WithHint("Could not obtain the authentication time."))
 
 		return
 	}
 
-	if authTime, err = userSession.AuthenticatedTime(client.Policy); err != nil {
-		ctx.Logger.Errorf("Authorization Request with id '%s' on client with id '%s' could not be processed: error occurred checking authentication time: %+v", requester.GetID(), client.GetID(), err)
+	ctx.Logger.Debugf("Authorization Request with id '%s' on client with id '%s' using policy '%s' was successfully processed for user '%s' with groups: %+v, proceeding to build Authorization Response", requester.GetID(), clientID, policy.Name, userSession.Username, userSession.Groups)
 
-		ctx.Providers.OpenIDConnect.Fosite.WriteAuthorizeError(rw, requester, fosite.ErrServerError.WithHint("Could not obtain the authentication time."))
+	session := oidc.NewSessionWithAuthorizeRequest(ctx, issuer, ctx.Providers.OpenIDConnect.KeyManager.GetKeyID(ctx, client.GetIDTokenSignedResponseKeyID(), client.GetIDTokenSignedResponseAlg()), details.Username, userSession.AuthenticationMethodRefs.MarshalRFC8176(), extraClaims, authTime, consent, requester)
 
-		return
-	}
+	ctx.Logger.Tracef("Authorization Request with id '%s' on client with id '%s' using policy '%s' creating session for Authorization Response for subject '%s' with username '%s' with groups: %+v and claims: %+v",
+		requester.GetID(), session.ClientID, policy.Name, session.Subject, session.Username, userSession.Groups, session.Claims)
 
-	ctx.Logger.Debugf("Authorization Request with id '%s' on client with id '%s' was successfully processed, proceeding to build Authorization Response", requester.GetID(), clientID)
+	ctx.Logger.WithFields(map[string]any{"id": requester.GetID(), "response_type": requester.GetResponseTypes(), "response_mode": requester.GetResponseMode(), "scope": requester.GetRequestedScopes(), "aud": requester.GetRequestedAudience(), "redirect_uri": requester.GetRedirectURI(), "state": requester.GetState()}).Tracef("Authorization Request is using the following request parameters")
 
-	subject := userSession.Username
-	oidcSession := oidc.NewSessionWithAuthorizeRequest(issuer, ctx.Providers.OpenIDConnect.KeyManager.GetActiveKeyID(),
-		subject, userSession.Username, extraClaims, authTime, workflowCreated, requester)
+	if responder, err = ctx.Providers.OpenIDConnect.NewAuthorizeResponse(ctx, requester, session); err != nil {
+		ctx.Logger.Errorf("Authorization Response for Request with id '%s' on client with id '%s' using policy '%s' could not be created: %s", requester.GetID(), clientID, policy.Name, oauthelia2.ErrorToDebugRFC6749Error(err))
 
-	ctx.Logger.Tracef("Authorization Request with id '%s' on client with id '%s' creating session for Authorization Response for subject '%s' with username '%s' with claims: %+v",
-		requester.GetID(), oidcSession.ClientID, oidcSession.Subject, oidcSession.Username, oidcSession.Claims)
-	ctx.Logger.Tracef("Authorization Request with id '%s' on client with id '%s' creating session for Authorization Response for subject '%s' with username '%s' with headers: %+v",
-		requester.GetID(), oidcSession.ClientID, oidcSession.Subject, oidcSession.Username, oidcSession.Headers)
-
-	if responder, err = ctx.Providers.OpenIDConnect.Fosite.NewAuthorizeResponse(ctx, requester, oidcSession); err != nil {
-		rfc := fosite.ErrorToRFC6749Error(err)
-
-		ctx.Logger.Errorf("Authorization Response for Request with id '%s' on client with id '%s' could not be created: %+v", requester.GetID(), clientID, rfc)
-
-		ctx.Providers.OpenIDConnect.Fosite.WriteAuthorizeError(rw, requester, err)
+		ctx.Providers.OpenIDConnect.WriteAuthorizeError(ctx, rw, requester, err)
 
 		return
 	}
 
-	ctx.Providers.OpenIDConnect.Fosite.WriteAuthorizeResponse(rw, requester, responder)
+	if err = ctx.Providers.StorageProvider.SaveOAuth2ConsentSessionGranted(ctx, consent.ID); err != nil {
+		ctx.Logger.Errorf("Authorization Request with id '%s' on client with id '%s' using policy '%s' could not be processed: error occurred saving consent session: %+v", requester.GetID(), client.GetID(), policy.Name, err)
+
+		ctx.Providers.OpenIDConnect.WriteAuthorizeError(ctx, rw, requester, oidc.ErrConsentCouldNotSave)
+
+		return
+	}
+
+	responder.GetParameters().Set(oidc.FormParameterIssuer, issuer.String())
+
+	ctx.Providers.OpenIDConnect.WriteAuthorizeResponse(ctx, rw, requester, responder)
 }
 
-func oidcAuthorizeHandleAuthorizationOrConsentInsufficient(
-	ctx *middlewares.AutheliaCtx, userSession session.UserSession, client *oidc.InternalClient, isAuthInsufficient bool,
-	rw http.ResponseWriter, r *http.Request,
-	requester fosite.AuthorizeRequester, issuer string) {
-	redirectURL := fmt.Sprintf("%s%s", issuer, string(ctx.Request.RequestURI()))
+// OpenIDConnectPushedAuthorizationRequest handles POST requests to the OAuth 2.0 Pushed Authorization Requests endpoint.
+//
+// RFC9126 https://www.rfc-editor.org/rfc/rfc9126.html
+func OpenIDConnectPushedAuthorizationRequest(ctx *middlewares.AutheliaCtx, rw http.ResponseWriter, r *http.Request) {
+	var (
+		requester oauthelia2.AuthorizeRequester
+		responder oauthelia2.PushedAuthorizeResponder
+		err       error
+	)
 
-	ctx.Logger.Debugf("Authorization Request with id '%s' on client with id '%s' requires user '%s' provides consent for scopes '%s'",
-		requester.GetID(), client.GetID(), userSession.Username, strings.Join(requester.GetRequestedScopes(), "', '"))
+	if requester, err = ctx.Providers.OpenIDConnect.NewPushedAuthorizeRequest(ctx, r); err != nil {
+		ctx.Logger.Errorf("Pushed Authorization Request failed with error: %s", oauthelia2.ErrorToDebugRFC6749Error(err))
 
-	userSession.OIDCWorkflowSession = &session.OIDCWorkflowSession{
-		ClientID:                   client.GetID(),
-		RequestedScopes:            requester.GetRequestedScopes(),
-		RequestedAudience:          requester.GetRequestedAudience(),
-		AuthURI:                    redirectURL,
-		TargetURI:                  requester.GetRedirectURI().String(),
-		RequiredAuthorizationLevel: client.Policy,
-		CreatedTimestamp:           time.Now().Unix(),
-	}
-
-	if err := ctx.SaveSession(userSession); err != nil {
-		ctx.Logger.Errorf("Authorization Request with id '%s' on client with id '%s' could not be processed: error occurred saving session for consent: %+v", requester.GetID(), client.GetID(), err)
-
-		ctx.Providers.OpenIDConnect.Fosite.WriteAuthorizeError(rw, requester, fosite.ErrServerError.WithHint("Could not save the session."))
+		ctx.Providers.OpenIDConnect.WritePushedAuthorizeError(ctx, rw, requester, err)
 
 		return
 	}
 
-	if isAuthInsufficient {
-		http.Redirect(rw, r, issuer, http.StatusFound)
-	} else {
-		http.Redirect(rw, r, fmt.Sprintf("%s/consent", issuer), http.StatusFound)
+	var client oidc.Client
+
+	clientID := requester.GetClient().GetID()
+
+	if client, err = ctx.Providers.OpenIDConnect.GetRegisteredClient(ctx, clientID); err != nil {
+		if errors.Is(err, oauthelia2.ErrNotFound) {
+			ctx.Logger.Errorf("Pushed Authorization Request with id '%s' on client with id '%s' could not be processed: client was not found", requester.GetID(), clientID)
+		} else {
+			ctx.Logger.Errorf("Pushed Authorization Request with id '%s' on client with id '%s' could not be processed: failed to find client: %+v", requester.GetID(), clientID, err)
+		}
+
+		ctx.Providers.OpenIDConnect.WritePushedAuthorizeError(ctx, rw, requester, err)
+
+		return
 	}
+
+	if err = client.ValidateResponseModePolicy(requester); err != nil {
+		ctx.Logger.Errorf("Pushed Authorization Request with id '%s' on client with id '%s' failed to validate the Response Mode: %s", requester.GetID(), client.GetID(), oauthelia2.ErrorToDebugRFC6749Error(err))
+
+		ctx.Providers.OpenIDConnect.WritePushedAuthorizeError(ctx, rw, requester, err)
+
+		return
+	}
+
+	if responder, err = ctx.Providers.OpenIDConnect.NewPushedAuthorizeResponse(ctx, requester, oidc.NewSession()); err != nil {
+		ctx.Logger.Errorf("Pushed Authorization Request failed with error: %s", oauthelia2.ErrorToDebugRFC6749Error(err))
+
+		ctx.Providers.OpenIDConnect.WritePushedAuthorizeError(ctx, rw, requester, err)
+
+		return
+	}
+
+	ctx.Providers.OpenIDConnect.WritePushedAuthorizeResponse(ctx, rw, requester, responder)
 }

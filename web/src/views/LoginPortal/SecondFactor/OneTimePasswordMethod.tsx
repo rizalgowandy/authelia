@@ -1,9 +1,12 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 
+import { Box } from "@mui/material";
 import { useTranslation } from "react-i18next";
 
-import { useRedirectionURL } from "@hooks/RedirectionURL";
+import { RedirectionURL } from "@constants/SearchParams";
+import { useQueryParam } from "@hooks/QueryParam";
 import { useUserInfoTOTPConfiguration } from "@hooks/UserInfoTOTPConfiguration";
+import { useWorkflow } from "@hooks/Workflow";
 import { completeTOTPSignIn } from "@services/OneTimePassword";
 import { AuthenticationLevel } from "@services/State";
 import LoadingPage from "@views/LoadingPage/LoadingPage";
@@ -32,8 +35,9 @@ const OneTimePasswordMethod = function (props: Props) {
     const [state, setState] = useState(
         props.authenticationLevel === AuthenticationLevel.TwoFactor ? State.Success : State.Idle,
     );
-    const redirectionURL = useRedirectionURL();
-    const { t: translate } = useTranslation("Portal");
+    const redirectionURL = useQueryParam(RedirectionURL);
+    const [workflow, workflowID] = useWorkflow();
+    const { t: translate } = useTranslation();
 
     const { onSignInSuccess, onSignInError } = props;
     const onSignInErrorCallback = useRef(onSignInError).current;
@@ -67,12 +71,12 @@ const OneTimePasswordMethod = function (props: Props) {
 
         try {
             setState(State.InProgress);
-            const res = await completeTOTPSignIn(passcodeStr, redirectionURL);
+            const res = await completeTOTPSignIn(passcodeStr, redirectionURL, workflow, workflowID);
             setState(State.Success);
             onSignInSuccessCallback(res ? res.redirect : undefined);
         } catch (err) {
             console.error(err);
-            onSignInErrorCallback(new Error("The one-time password might be wrong"));
+            onSignInErrorCallback(new Error(translate("The One-Time Password might be wrong")));
             setState(State.Failure);
         }
         setPasscode("");
@@ -81,9 +85,12 @@ const OneTimePasswordMethod = function (props: Props) {
         onSignInSuccessCallback,
         passcode,
         redirectionURL,
+        workflow,
+        workflowID,
         resp,
         props.authenticationLevel,
         props.registered,
+        translate,
     ]);
 
     // Set successful state if user is already authenticated.
@@ -94,7 +101,7 @@ const OneTimePasswordMethod = function (props: Props) {
     }, [props.authenticationLevel, setState]);
 
     useEffect(() => {
-        signInFunc();
+        signInFunc().catch(console.error);
     }, [signInFunc]);
 
     let methodState = MethodContainerState.METHOD;
@@ -108,13 +115,13 @@ const OneTimePasswordMethod = function (props: Props) {
         <MethodContainer
             id={props.id}
             title={translate("One-Time Password")}
-            explanation={translate("Enter one-time password")}
+            explanation={translate("Enter One-Time Password")}
             duoSelfEnrollment={false}
             registered={props.registered}
             state={methodState}
             onRegisterClick={props.onRegisterClick}
         >
-            <div>
+            <Box>
                 {resp !== undefined || err !== undefined ? (
                     <OTPDial
                         passcode={passcode}
@@ -126,7 +133,7 @@ const OneTimePasswordMethod = function (props: Props) {
                 ) : (
                     <LoadingPage />
                 )}
-            </div>
+            </Box>
         </MethodContainer>
     );
 };

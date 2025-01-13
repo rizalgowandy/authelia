@@ -11,15 +11,17 @@ type ActiveDirectorySuite struct {
 }
 
 func NewActiveDirectorySuite() *ActiveDirectorySuite {
-	return &ActiveDirectorySuite{RodSuite: new(RodSuite)}
+	return &ActiveDirectorySuite{
+		RodSuite: NewRodSuite(activedirectorySuiteName),
+	}
 }
 
-func (s *ActiveDirectorySuite) TestOneFactorScenario() {
-	suite.Run(s.T(), NewOneFactorScenario())
+func (s *ActiveDirectorySuite) Test1FAScenario() {
+	suite.Run(s.T(), New1FAScenario())
 }
 
-func (s *ActiveDirectorySuite) TestTwoFactorScenario() {
-	suite.Run(s.T(), NewTwoFactorScenario())
+func (s *ActiveDirectorySuite) Test2FATOTPScenario() {
+	suite.Run(s.T(), New2FATOTPScenario())
 }
 
 func (s *ActiveDirectorySuite) TestResetPassword() {

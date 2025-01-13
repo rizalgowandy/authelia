@@ -1,6 +1,7 @@
 import React, { ReactNode } from "react";
 
-import { makeStyles } from "@material-ui/core";
+import { Box, Theme } from "@mui/material";
+import makeStyles from "@mui/styles/makeStyles";
 import classnames from "classnames";
 
 interface IconWithContextProps {
@@ -12,7 +13,7 @@ interface IconWithContextProps {
 
 const IconWithContext = function (props: IconWithContextProps) {
     const iconSize = 64;
-    const style = makeStyles((theme) => ({
+    const styles = makeStyles((theme: Theme) => ({
         root: {},
         iconContainer: {
             display: "flex",
@@ -29,12 +30,12 @@ const IconWithContext = function (props: IconWithContextProps) {
     }))();
 
     return (
-        <div className={classnames(props.className, style.root)}>
-            <div className={style.iconContainer}>
-                <div className={style.icon}>{props.icon}</div>
-            </div>
-            <div className={style.context}>{props.children}</div>
-        </div>
+        <Box className={classnames(props.className, styles.root)}>
+            <Box className={styles.iconContainer}>
+                <Box className={styles.icon}>{props.icon}</Box>
+            </Box>
+            <Box className={styles.context}>{props.children}</Box>
+        </Box>
     );
 };
 

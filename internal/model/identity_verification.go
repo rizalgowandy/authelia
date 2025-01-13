@@ -1,19 +1,20 @@
 package model
 
 import (
+	"database/sql"
 	"net"
 	"time"
 
-	"github.com/golang-jwt/jwt/v4"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 )
 
 // NewIdentityVerification creates a new IdentityVerification from a given username and action.
-func NewIdentityVerification(jti uuid.UUID, username, action string, ip net.IP) (verification IdentityVerification) {
+func NewIdentityVerification(jti uuid.UUID, username, action string, ip net.IP, expiration time.Duration) (verification IdentityVerification) {
 	return IdentityVerification{
 		JTI:       jti,
 		IssuedAt:  time.Now(),
-		ExpiresAt: time.Now().Add(5 * time.Minute),
+		ExpiresAt: time.Now().Add(expiration),
 		Action:    action,
 		Username:  username,
 		IssuedIP:  NewIP(ip),
@@ -22,15 +23,17 @@ func NewIdentityVerification(jti uuid.UUID, username, action string, ip net.IP) 
 
 // IdentityVerification represents an identity verification row in the database.
 type IdentityVerification struct {
-	ID         int        `db:"id"`
-	JTI        uuid.UUID  `db:"jti"`
-	IssuedAt   time.Time  `db:"iat"`
-	IssuedIP   IP         `db:"issued_ip"`
-	ExpiresAt  time.Time  `db:"exp"`
-	Action     string     `db:"action"`
-	Username   string     `db:"username"`
-	Consumed   *time.Time `db:"consumed"`
-	ConsumedIP NullIP     `db:"consumed_ip"`
+	ID         int          `db:"id"`
+	JTI        uuid.UUID    `db:"jti"`
+	IssuedAt   time.Time    `db:"iat"`
+	IssuedIP   IP           `db:"issued_ip"`
+	ExpiresAt  time.Time    `db:"exp"`
+	Action     string       `db:"action"`
+	Username   string       `db:"username"`
+	ConsumedAt sql.NullTime `db:"consumed"`
+	ConsumedIP NullIP       `db:"consumed_ip"`
+	RevokedAt  sql.NullTime `db:"revoked"`
+	RevokedIP  NullIP       `db:"revoked_ip"`
 }
 
 // ToIdentityVerificationClaim converts the IdentityVerification into a IdentityVerificationClaim.

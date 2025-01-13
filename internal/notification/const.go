@@ -1,9 +1,14 @@
 package notification
 
 const (
-	fileNotifierMode = 0600
+	fileNotifierMode   = 0600
+	fileNotifierHeader = "Date: %s\nRecipient: %s\nSubject: %s\n"
 )
 
 const (
-	rfc5322DateTimeLayout = "Mon, 2 Jan 2006 15:04:05 -0700"
+	posixNewLine = "\n"
+)
+
+var (
+	posixDoubleNewLine = []byte(posixNewLine + posixNewLine)
 )

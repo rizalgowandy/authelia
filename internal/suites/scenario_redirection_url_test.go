@@ -16,13 +16,12 @@ type RedirectionURLScenario struct {
 
 func NewRedirectionURLScenario() *RedirectionURLScenario {
 	return &RedirectionURLScenario{
-		RodSuite: new(RodSuite),
+		RodSuite: NewRodSuite(""),
 	}
 }
 
 func (s *RedirectionURLScenario) SetupSuite() {
-	browser, err := StartRod()
-
+	browser, err := NewRodSession(RodSessionWithCredentials(s))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -56,7 +55,7 @@ func (s *RedirectionURLScenario) TestShouldVerifyCustomURLParametersArePropagate
 	}()
 
 	targetURL := fmt.Sprintf("%s/secret.html?myparam=test", SingleFactorBaseURL)
-	s.doLoginOneFactor(s.T(), s.Context(ctx), "john", "password", false, targetURL)
+	s.doLoginOneFactor(s.T(), s.Context(ctx), "john", "password", false, BaseDomain, targetURL)
 	s.verifySecretAuthorized(s.T(), s.Context(ctx))
 	s.verifyURLIs(s.T(), s.Context(ctx), targetURL)
 }

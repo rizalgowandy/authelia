@@ -5,7 +5,6 @@ import (
 	"net/url"
 
 	"github.com/authelia/authelia/v4/internal/middlewares"
-	"github.com/authelia/authelia/v4/internal/utils"
 )
 
 type logoutBody struct {
@@ -16,24 +15,24 @@ type logoutResponseBody struct {
 	SafeTargetURL bool `json:"safeTargetURL"`
 }
 
-// LogoutPost is the handler logging out the user attached to the given cookie.
-func LogoutPost(ctx *middlewares.AutheliaCtx) {
+// LogoutPOST is the handler logging out the user attached to the given cookie.
+func LogoutPOST(ctx *middlewares.AutheliaCtx) {
 	body := logoutBody{}
 	responseBody := logoutResponseBody{SafeTargetURL: false}
 
 	err := ctx.ParseBody(&body)
 	if err != nil {
-		ctx.Error(fmt.Errorf("unable to parse body during logout: %s", err), messageOperationFailed)
+		ctx.Error(fmt.Errorf("unable to parse body during logout: %w", err), messageOperationFailed)
 	}
 
-	err = ctx.Providers.SessionProvider.DestroySession(ctx.RequestCtx)
+	err = ctx.DestroySession()
 	if err != nil {
-		ctx.Error(fmt.Errorf("unable to destroy session during logout: %s", err), messageOperationFailed)
+		ctx.Error(fmt.Errorf("unable to destroy session during logout: %w", err), messageOperationFailed)
 	}
 
-	redirectionURL, err := url.Parse(body.TargetURL)
+	redirectionURL, err := url.ParseRequestURI(body.TargetURL)
 	if err == nil {
-		responseBody.SafeTargetURL = utils.IsRedirectionSafe(*redirectionURL, ctx.Configuration.Session.Domain)
+		responseBody.SafeTargetURL = ctx.IsSafeRedirectionTargetURI(redirectionURL)
 	}
 
 	if body.TargetURL != "" {
@@ -42,6 +41,6 @@ func LogoutPost(ctx *middlewares.AutheliaCtx) {
 
 	err = ctx.SetJSONBody(responseBody)
 	if err != nil {
-		ctx.Error(fmt.Errorf("unable to set body during logout: %s", err), messageOperationFailed)
+		ctx.Error(fmt.Errorf("unable to set body during logout: %w", err), messageOperationFailed)
 	}
 }

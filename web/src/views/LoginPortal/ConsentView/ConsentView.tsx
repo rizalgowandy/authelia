@@ -1,26 +1,30 @@
-import React, { useEffect, Fragment, ReactNode } from "react";
+import React, { Fragment, ReactNode, useEffect, useState } from "react";
 
+import { AccountBox, Autorenew, CheckBox, Contacts, Drafts, Group, LockOpen } from "@mui/icons-material";
 import {
     Button,
-    Grid,
+    Checkbox,
+    FormControlLabel,
     List,
     ListItem,
     ListItemIcon,
     ListItemText,
+    Theme,
     Tooltip,
     Typography,
-    makeStyles,
-} from "@material-ui/core";
-import { AccountBox, CheckBox, Contacts, Drafts, Group } from "@material-ui/icons";
+} from "@mui/material";
+import Grid from "@mui/material/Grid2";
+import makeStyles from "@mui/styles/makeStyles";
 import { useTranslation } from "react-i18next";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { IndexRoute } from "@constants/Routes";
-import { useRequestedScopes } from "@hooks/Consent";
+import { Identifier } from "@constants/SearchParams";
 import { useNotifications } from "@hooks/NotificationsContext";
 import { useRedirector } from "@hooks/Redirector";
+import { useUserInfoGET } from "@hooks/UserInfo";
 import LoginLayout from "@layouts/LoginLayout";
-import { acceptConsent, rejectConsent } from "@services/Consent";
+import { ConsentGetResponseBody, acceptConsent, getConsentResponse, rejectConsent } from "@services/Consent";
 import LoadingPage from "@views/LoadingPage/LoadingPage";
 
 export interface Props {}
@@ -29,46 +33,85 @@ function scopeNameToAvatar(id: string) {
     switch (id) {
         case "openid":
             return <AccountBox />;
+        case "offline_access":
+            return <Autorenew />;
         case "profile":
             return <Contacts />;
         case "groups":
             return <Group />;
         case "email":
             return <Drafts />;
+        case "authelia.bearer.authz":
+            return <LockOpen />;
         default:
             return <CheckBox />;
     }
 }
 
 const ConsentView = function (props: Props) {
-    const classes = useStyles();
-    const navigate = useNavigate();
-    const redirect = useRedirector();
+    const { t: translate } = useTranslation();
+
+    const [userInfo, fetchUserInfo, , fetchUserInfoError] = useUserInfoGET();
+
     const { createErrorNotification, resetNotification } = useNotifications();
-    const [resp, fetch, , err] = useRequestedScopes();
-    const { t: translate } = useTranslation("Portal");
+    const navigate = useNavigate();
+    const [searchParams] = useSearchParams();
+    const redirect = useRedirector();
+    const consentID = searchParams.get(Identifier);
+
+    const [response, setResponse] = useState<ConsentGetResponseBody>();
+    const [error, setError] = useState<any>(undefined);
+    const [preConfigure, setPreConfigure] = useState(false);
+
+    const styles = useStyles();
+
+    const handlePreConfigureChanged = () => {
+        setPreConfigure((preConfigure) => !preConfigure);
+    };
 
     useEffect(() => {
-        if (err) {
-            navigate(IndexRoute);
-            console.error(`Unable to display consent screen: ${err.message}`);
+        fetchUserInfo();
+    }, [fetchUserInfo]);
+
+    useEffect(() => {
+        if (consentID !== null) {
+            getConsentResponse(consentID)
+                .then((r) => {
+                    setResponse(r);
+                })
+                .catch((error) => {
+                    setError(error);
+                });
         }
-    }, [navigate, resetNotification, createErrorNotification, err]);
+    }, [consentID]);
 
     useEffect(() => {
-        fetch();
-    }, [fetch]);
+        if (error) {
+            navigate(IndexRoute);
+            console.error(`Unable to display consent screen: ${error.message}`);
+        }
+    }, [navigate, resetNotification, createErrorNotification, error]);
+
+    useEffect(() => {
+        if (fetchUserInfoError) {
+            createErrorNotification(translate("There was an issue retrieving user preferences"));
+        }
+    }, [fetchUserInfoError, resetNotification, createErrorNotification, translate]);
 
     const translateScopeNameToDescription = (id: string): string => {
         switch (id) {
             case "openid":
                 return translate("Use OpenID to verify your identity");
+            case "offline_access":
+                return translate("Automatically refresh these permissions without user interaction");
             case "profile":
-                return translate("Access your display name");
+                return translate("Access your profile information");
             case "groups":
                 return translate("Access your group membership");
             case "email":
                 return translate("Access your email addresses");
+            case "authelia.bearer.authz":
+                return translate("Access protected resources logged in as you");
             default:
                 return id;
         }
@@ -76,10 +119,10 @@ const ConsentView = function (props: Props) {
 
     const handleAcceptConsent = async () => {
         // This case should not happen in theory because the buttons are disabled when response is undefined.
-        if (!resp) {
+        if (!response) {
             return;
         }
-        const res = await acceptConsent(resp.client_id);
+        const res = await acceptConsent(preConfigure, response.client_id, consentID);
         if (res.redirect_uri) {
             redirect(res.redirect_uri);
         } else {
@@ -88,10 +131,10 @@ const ConsentView = function (props: Props) {
     };
 
     const handleRejectConsent = async () => {
-        if (!resp) {
+        if (!response) {
             return;
         }
-        const res = await rejectConsent(resp.client_id);
+        const res = await rejectConsent(response.client_id, consentID);
         if (res.redirect_uri) {
             redirect(res.redirect_uri);
         } else {
@@ -100,32 +143,37 @@ const ConsentView = function (props: Props) {
     };
 
     return (
-        <ComponentOrLoading ready={resp !== undefined}>
-            <LoginLayout id="consent-stage" title={`Permissions Request`} showBrand>
-                <Grid container>
-                    <Grid item xs={12}>
+        <ComponentOrLoading ready={response !== undefined && userInfo !== undefined}>
+            <LoginLayout
+                id="consent-stage"
+                title={`${translate("Hi")} ${userInfo?.display_name}`}
+                subtitle={translate("Consent Request")}
+            >
+                <Grid container alignItems={"center"} justifyContent="center">
+                    <Grid size={{ xs: 12 }}>
                         <div>
-                            {resp !== undefined && resp.client_description !== "" ? (
-                                <Tooltip title={"Client ID: " + resp.client_id}>
-                                    <Typography className={classes.clientDescription}>
-                                        {resp.client_description}
-                                    </Typography>
-                                </Tooltip>
-                            ) : (
-                                <Tooltip title={"Client ID: " + resp?.client_id}>
-                                    <Typography className={classes.clientDescription}>{resp?.client_id}</Typography>
-                                </Tooltip>
-                            )}
+                            <Tooltip
+                                title={
+                                    translate("Client ID", { client_id: response?.client_id }) ||
+                                    "Client ID: " + response?.client_id
+                                }
+                            >
+                                <Typography className={styles.clientDescription}>
+                                    {response !== undefined && response.client_description !== ""
+                                        ? response.client_description
+                                        : response?.client_id}
+                                </Typography>
+                            </Tooltip>
                         </div>
                     </Grid>
-                    <Grid item xs={12}>
+                    <Grid size={{ xs: 12 }}>
                         <div>{translate("The above application is requesting the following permissions")}:</div>
                     </Grid>
-                    <Grid item xs={12}>
-                        <div className={classes.scopesListContainer}>
-                            <List className={classes.scopesList}>
-                                {resp?.scopes.map((scope: string) => (
-                                    <Tooltip title={"Scope " + scope}>
+                    <Grid size={{ xs: 12 }}>
+                        <div className={styles.scopesListContainer}>
+                            <List className={styles.scopesList}>
+                                {response?.scopes.map((scope: string) => (
+                                    <Tooltip title={translate("Scope", { name: scope })}>
                                         <ListItem id={"scope-" + scope} dense>
                                             <ListItemIcon>{scopeNameToAvatar(scope)}</ListItemIcon>
                                             <ListItemText primary={translateScopeNameToDescription(scope)} />
@@ -135,13 +183,34 @@ const ConsentView = function (props: Props) {
                             </List>
                         </div>
                     </Grid>
-                    <Grid item xs={12}>
+                    {response?.pre_configuration ? (
+                        <Grid size={{ xs: 12 }}>
+                            <Tooltip
+                                title={translate("This saves this consent as a pre-configured consent for future use")}
+                            >
+                                <FormControlLabel
+                                    control={
+                                        <Checkbox
+                                            id="pre-configure"
+                                            checked={preConfigure}
+                                            onChange={handlePreConfigureChanged}
+                                            value="preConfigure"
+                                            color="primary"
+                                        />
+                                    }
+                                    className={styles.preConfigure}
+                                    label={translate("Remember Consent")}
+                                />
+                            </Tooltip>
+                        </Grid>
+                    ) : null}
+                    <Grid size={{ xs: 12 }}>
                         <Grid container spacing={1}>
-                            <Grid item xs={6}>
+                            <Grid size={{ xs: 6 }}>
                                 <Button
                                     id="accept-button"
-                                    className={classes.button}
-                                    disabled={!resp}
+                                    className={styles.button}
+                                    disabled={!response}
                                     onClick={handleAcceptConsent}
                                     color="primary"
                                     variant="contained"
@@ -149,11 +218,11 @@ const ConsentView = function (props: Props) {
                                     {translate("Accept")}
                                 </Button>
                             </Grid>
-                            <Grid item xs={6}>
+                            <Grid size={{ xs: 6 }}>
                                 <Button
                                     id="deny-button"
-                                    className={classes.button}
-                                    disabled={!resp}
+                                    className={styles.button}
+                                    disabled={!response}
                                     onClick={handleRejectConsent}
                                     color="secondary"
                                     variant="contained"
@@ -169,7 +238,7 @@ const ConsentView = function (props: Props) {
     );
 };
 
-const useStyles = makeStyles((theme) => ({
+const useStyles = makeStyles((theme: Theme) => ({
     container: {
         paddingTop: theme.spacing(4),
         paddingBottom: theme.spacing(4),
@@ -207,9 +276,8 @@ const useStyles = makeStyles((theme) => ({
         textAlign: "center",
         marginRight: theme.spacing(2),
     },
+    preConfigure: {},
 }));
-
-export default ConsentView;
 
 interface ComponentOrLoadingProps {
     ready: boolean;
@@ -227,3 +295,5 @@ function ComponentOrLoading(props: ComponentOrLoadingProps) {
         </Fragment>
     );
 }
+
+export default ConsentView;

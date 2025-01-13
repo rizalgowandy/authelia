@@ -1,6 +1,8 @@
 import React, { ReactNode, useState } from "react";
 
-import { makeStyles, Typography, Grid, Button, Container } from "@material-ui/core";
+import { Box, Button, Container, Theme, Typography } from "@mui/material";
+import Grid from "@mui/material/Grid2";
+import makeStyles from "@mui/styles/makeStyles";
 
 import PushNotificationIcon from "@components/PushNotificationIcon";
 
@@ -90,8 +92,6 @@ const DefaultDeviceSelectionContainer = function (props: Props) {
     );
 };
 
-export default DefaultDeviceSelectionContainer;
-
 interface DeviceItemProps {
     id: number;
     device: SelectableDevice;
@@ -99,10 +99,10 @@ interface DeviceItemProps {
     onSelect: () => void;
 }
 
-function DeviceItem(props: DeviceItemProps) {
+const DeviceItem = function (props: DeviceItemProps) {
     const className = "device-option-" + props.id;
     const idName = "device-" + props.device.id;
-    const style = makeStyles((theme) => ({
+    const style = makeStyles((theme: Theme) => ({
         item: {
             paddingTop: theme.spacing(4),
             paddingBottom: theme.spacing(4),
@@ -118,7 +118,7 @@ function DeviceItem(props: DeviceItemProps) {
     }))();
 
     return (
-        <Grid item xs={12} className={className} id={idName}>
+        <Grid size={{ xs: 12 }} className={className} id={idName}>
             <Button
                 className={style.item}
                 color="primary"
@@ -126,16 +126,16 @@ function DeviceItem(props: DeviceItemProps) {
                 variant="contained"
                 onClick={props.onSelect}
             >
-                <div className={style.icon}>
+                <Box className={style.icon}>
                     <PushNotificationIcon width={32} height={32} />
-                </div>
-                <div>
+                </Box>
+                <Box>
                     <Typography>{props.device.name}</Typography>
-                </div>
+                </Box>
             </Button>
         </Grid>
     );
-}
+};
 
 interface MethodItemProps {
     id: number;
@@ -144,10 +144,10 @@ interface MethodItemProps {
     onSelect: () => void;
 }
 
-function MethodItem(props: MethodItemProps) {
+const MethodItem = function (props: MethodItemProps) {
     const className = "method-option-" + props.id;
     const idName = "method-" + props.method;
-    const style = makeStyles((theme) => ({
+    const style = makeStyles((theme: Theme) => ({
         item: {
             paddingTop: theme.spacing(4),
             paddingBottom: theme.spacing(4),
@@ -163,7 +163,7 @@ function MethodItem(props: MethodItemProps) {
     }))();
 
     return (
-        <Grid item xs={12} className={className} id={idName}>
+        <Grid size={{ xs: 12 }} className={className} id={idName}>
             <Button
                 className={style.item}
                 color="primary"
@@ -171,13 +171,15 @@ function MethodItem(props: MethodItemProps) {
                 variant="contained"
                 onClick={props.onSelect}
             >
-                <div className={style.icon}>
+                <Box className={style.icon}>
                     <PushNotificationIcon width={32} height={32} />
-                </div>
-                <div>
+                </Box>
+                <Box>
                     <Typography>{props.method}</Typography>
-                </div>
+                </Box>
             </Button>
         </Grid>
     );
-}
+};
+
+export default DefaultDeviceSelectionContainer;

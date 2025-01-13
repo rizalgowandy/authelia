@@ -16,14 +16,13 @@ type AvailableMethodsScenario struct {
 
 func NewAvailableMethodsScenario(methods []string) *AvailableMethodsScenario {
 	return &AvailableMethodsScenario{
-		RodSuite: new(RodSuite),
+		RodSuite: NewRodSuite(""),
 		methods:  methods,
 	}
 }
 
 func (s *AvailableMethodsScenario) SetupSuite() {
-	browser, err := StartRod()
-
+	browser, err := NewRodSession(RodSessionWithCredentials(s))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -56,13 +55,13 @@ func (s *AvailableMethodsScenario) TestShouldCheckAvailableMethods() {
 		s.collectScreenshot(ctx.Err(), s.Page)
 	}()
 
-	s.doLoginOneFactor(s.T(), s.Context(ctx), "john", "password", false, "")
+	s.doLoginOneFactor(s.T(), s.Context(ctx), "john", "password", false, BaseDomain, "")
 
-	methodsButton := s.WaitElementLocatedByCSSSelector(s.T(), s.Context(ctx), "methods-button")
-	err := methodsButton.Click("left")
+	methodsButton := s.WaitElementLocatedByID(s.T(), s.Context(ctx), "methods-button")
+	err := methodsButton.Click("left", 1)
 	s.Assert().NoError(err)
 
-	methodsDialog := s.WaitElementLocatedByCSSSelector(s.T(), s.Context(ctx), "methods-dialog")
+	methodsDialog := s.WaitElementLocatedByID(s.T(), s.Context(ctx), "methods-dialog")
 	options, err := methodsDialog.Elements(".method-option")
 	s.Assert().NoError(err)
 	s.Assert().Len(options, len(s.methods))

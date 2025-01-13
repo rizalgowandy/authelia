@@ -3,8 +3,8 @@ package configuration
 import (
 	"fmt"
 
-	"github.com/knadh/koanf"
-	"github.com/mitchellh/mapstructure"
+	"github.com/go-viper/mapstructure/v2"
+	"github.com/knadh/koanf/v2"
 
 	"github.com/authelia/authelia/v4/internal/configuration/schema"
 )
@@ -19,7 +19,7 @@ func Load(val *schema.StructValidator, sources ...Source) (keys []string, config
 }
 
 // LoadAdvanced is intended to give more flexibility over loading a particular path to a specific interface.
-func LoadAdvanced(val *schema.StructValidator, path string, result interface{}, sources ...Source) (keys []string, err error) {
+func LoadAdvanced(val *schema.StructValidator, path string, result any, sources ...Source) (keys []string, err error) {
 	if val == nil {
 		return keys, errNoValidator
 	}
@@ -29,24 +29,47 @@ func LoadAdvanced(val *schema.StructValidator, path string, result interface{}, 
 		StrictMerge: false,
 	})
 
-	err = loadSources(ko, val, sources...)
-	if err != nil {
+	if err = loadSources(ko, val, sources...); err != nil {
 		return ko.Keys(), err
 	}
 
-	unmarshal(ko, val, path, result)
+	var final *koanf.Koanf
 
-	return ko.Keys(), nil
+	if final, err = koanfRemapKeys(val, ko, deprecations, deprecationsMKM); err != nil {
+		return koanfGetKeys(ko), err
+	}
+
+	unmarshal(final, val, path, result)
+
+	return koanfGetKeys(final), nil
 }
 
-func unmarshal(ko *koanf.Koanf, val *schema.StructValidator, path string, o interface{}) {
+func mapHasKey(k string, m map[string]any) bool {
+	if _, ok := m[k]; ok {
+		return true
+	}
+
+	return false
+}
+
+func unmarshal(ko *koanf.Koanf, val *schema.StructValidator, path string, o any) {
 	c := koanf.UnmarshalConf{
 		DecoderConfig: &mapstructure.DecoderConfig{
 			DecodeHook: mapstructure.ComposeDecodeHookFunc(
 				mapstructure.StringToSliceHookFunc(","),
 				StringToMailAddressHookFunc(),
-				ToTimeDurationHookFunc(),
 				StringToURLHookFunc(),
+				StringToRegexpHookFunc(),
+				StringToAddressHookFunc(),
+				StringToX509CertificateHookFunc(),
+				StringToX509CertificateChainHookFunc(),
+				StringToPrivateKeyHookFunc(),
+				StringToCryptoPrivateKeyHookFunc(),
+				StringToCryptographicKeyHookFunc(),
+				StringToTLSVersionHookFunc(),
+				StringToPasswordDigestHookFunc(),
+				ToTimeDurationHookFunc(),
+				ToRefreshIntervalDurationHookFunc(),
 			),
 			Metadata:         nil,
 			Result:           o,
@@ -65,15 +88,13 @@ func loadSources(ko *koanf.Koanf, val *schema.StructValidator, sources ...Source
 	}
 
 	for _, source := range sources {
-		err := source.Load(val)
-		if err != nil {
+		if err = source.Load(val); err != nil {
 			val.Push(fmt.Errorf("failed to load configuration from %s source: %+v", source.Name(), err))
 
 			continue
 		}
 
-		err = source.Merge(ko, val)
-		if err != nil {
+		if err = source.Merge(ko, val); err != nil {
 			val.Push(fmt.Errorf("failed to merge configuration from %s source: %+v", source.Name(), err))
 
 			continue

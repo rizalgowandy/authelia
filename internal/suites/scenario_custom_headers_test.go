@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	mapset "github.com/deckarep/golang-set"
+	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/stretchr/testify/suite"
 )
 
@@ -19,13 +19,12 @@ type CustomHeadersScenario struct {
 
 func NewCustomHeadersScenario() *CustomHeadersScenario {
 	return &CustomHeadersScenario{
-		RodSuite: new(RodSuite),
+		RodSuite: NewRodSuite(""),
 	}
 }
 
 func (s *CustomHeadersScenario) SetupSuite() {
-	browser, err := StartRod()
-
+	browser, err := NewRodSession(RodSessionWithCredentials(s))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -89,10 +88,10 @@ func (s *CustomHeadersScenario) TestShouldForwardCustomHeaderForAuthenticatedUse
 		s.collectScreenshot(ctx.Err(), s.Page)
 	}()
 
-	expectedGroups := mapset.NewSetWith("dev", "admins")
+	expectedGroups := mapset.NewSet("dev", "admins")
 
 	targetURL := fmt.Sprintf("%s/headers", PublicBaseURL)
-	s.doLoginOneFactor(s.T(), s.Context(ctx), "john", "password", false, targetURL)
+	s.doLoginOneFactor(s.T(), s.Context(ctx), "john", "password", false, BaseDomain, targetURL)
 	s.verifyIsPublic(s.T(), s.Context(ctx))
 
 	body, err := s.Context(ctx).Element("body")
@@ -109,7 +108,7 @@ func (s *CustomHeadersScenario) TestShouldForwardCustomHeaderForAuthenticatedUse
 	}
 
 	groups := strings.Split(payload.Headers.ForwardedGroups, ",")
-	actualGroups := mapset.NewSet()
+	actualGroups := mapset.NewSet[string]()
 
 	for _, group := range groups {
 		actualGroups.Add(group)

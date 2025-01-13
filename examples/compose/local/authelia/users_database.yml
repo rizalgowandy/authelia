@@ -8,10 +8,11 @@
 # List of users
 users:
   <USERNAME>:
-    displayname: "<DISPLAYNAME>"
-    password: "<PASSWORD>"
-    email: <USERNAME>@example.com
+    disabled: false
+    displayname: '<DISPLAYNAME>'
+    password: '<PASSWORD>'
+    email: '<USERNAME>@example.com'
     groups:
-      - admins
-      - dev
+      - 'admins'
+      - 'dev'
 ...

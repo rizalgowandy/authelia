@@ -1,10 +1,11 @@
 ---
-version: '3'
 services:
   authelia-backend:
+    environment:
+      X_AUTHELIA_CONFIG_FILTERS: 'template'
     volumes:
-      - './OIDCTraefik/configuration.yml:/config/configuration.yml:ro'
+      - './OIDCTraefik/configuration.yml:/config/configuration.yml'
       - './OIDCTraefik/users.yml:/config/users.yml'
-      - './OIDCTraefik/keypair/key.pem:/config/issuer.pem:ro'
-      - './common/ssl:/config/ssl:ro'
+      - './common/pki:/pki'
+      - './common/pki/public.crt:/certs/public.crt'
 ...
