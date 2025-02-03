@@ -10,18 +10,22 @@ import (
 )
 
 type NetworkACLSuite struct {
-	suite.Suite
+	*BaseSuite
 }
 
 func NewNetworkACLSuite() *NetworkACLSuite {
-	return &NetworkACLSuite{}
+	return &NetworkACLSuite{
+		BaseSuite: &BaseSuite{
+			Name: networkACLSuiteName,
+		},
+	}
 }
 
 func (s *NetworkACLSuite) TestShouldAccessSecretUpon2FA() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	browser, err := StartRod()
+	browser, err := NewRodSession()
 	s.Require().NoError(err)
 
 	defer func() {
@@ -34,7 +38,7 @@ func (s *NetworkACLSuite) TestShouldAccessSecretUpon2FA() {
 	page := browser.doCreateTab(s.T(), targetURL).Context(ctx)
 
 	browser.verifyIsFirstFactorPage(s.T(), page)
-	browser.doRegisterAndLogin2FA(s.T(), page, "john", "password", false, targetURL)
+	browser.doRegisterTOTPAndLogin2FA(s.T(), page, "john", "password", false, targetURL)
 	browser.verifySecretAuthorized(s.T(), page)
 }
 
@@ -43,7 +47,7 @@ func (s *NetworkACLSuite) TestShouldAccessSecretUpon1FA() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	browser, err := StartRodWithProxy("http://proxy-client1.example.com:3128")
+	browser, err := NewRodSession(RodSessionWithProxy("http://proxy-client1.example.com:3128"))
 	s.Require().NoError(err)
 
 	defer func() {
@@ -57,7 +61,7 @@ func (s *NetworkACLSuite) TestShouldAccessSecretUpon1FA() {
 
 	browser.verifyIsFirstFactorPage(s.T(), page)
 	browser.doLoginOneFactor(s.T(), page, "john", "password",
-		false, fmt.Sprintf("%s/secret.html", SecureBaseURL))
+		false, BaseDomain, fmt.Sprintf("%s/secret.html", SecureBaseURL))
 	browser.verifySecretAuthorized(s.T(), page)
 }
 
@@ -66,7 +70,7 @@ func (s *NetworkACLSuite) TestShouldAccessSecretUpon0FA() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	browser, err := StartRodWithProxy("http://proxy-client2.example.com:3128")
+	browser, err := NewRodSession(RodSessionWithProxy("http://proxy-client2.example.com:3128"))
 	s.Require().NoError(err)
 
 	defer func() {

@@ -52,6 +52,10 @@ func (de *DockerEnvironment) Pull(images ...string) error {
 
 // Up spawn a docker environment.
 func (de *DockerEnvironment) Up() error {
+	if os.Getenv("CI") == t {
+		return de.createCommandWithStdout("up --build --quiet-pull -d").Run()
+	}
+
 	return de.createCommandWithStdout("up --build -d").Run()
 }
 
@@ -89,4 +93,23 @@ func (de *DockerEnvironment) Logs(service string, flags []string) (string, error
 	content, err := cmd.Output()
 
 	return string(content), err
+}
+
+// PrintLogs for the given service names.
+func (de *DockerEnvironment) PrintLogs(services ...string) (err error) {
+	var logs string
+
+	for _, service := range services {
+		if service == "authelia-frontend" && os.Getenv("CI") == t {
+			continue
+		}
+
+		if logs, err = de.Logs(service, nil); err != nil {
+			return err
+		}
+
+		fmt.Println(logs) //nolint:forbidigo
+	}
+
+	return nil
 }

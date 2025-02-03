@@ -1,8 +1,8 @@
 ---
-version: '3'
 services:
   authelia-backend:
     volumes:
-      - './LDAP/configuration.yml:/config/configuration.yml:ro'
-      - './common/ssl:/config/ssl:ro'
+      - './LDAP/configuration.yml:/config/configuration.yml'
+      - './common/pki:/pki'
+      - './common/pki/public.crt:/certs/public.crt'
 ...

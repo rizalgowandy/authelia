@@ -1,29 +1,26 @@
 package session
 
 import (
-	"context"
+	"net"
 	"time"
 
-	"github.com/fasthttp/session/v2"
-	"github.com/fasthttp/session/v2/providers/redis"
+	session "github.com/fasthttp/session/v2"
 	"github.com/go-webauthn/webauthn/webauthn"
-	"github.com/sirupsen/logrus"
 
 	"github.com/authelia/authelia/v4/internal/authentication"
-	"github.com/authelia/authelia/v4/internal/authorization"
-	"github.com/authelia/authelia/v4/internal/logging"
+	"github.com/authelia/authelia/v4/internal/oidc"
 )
 
 // ProviderConfig is the configuration used to create the session provider.
 type ProviderConfig struct {
-	config              session.Config
-	redisConfig         *redis.Config
-	redisSentinelConfig *redis.FailoverConfig
-	providerName        string
+	config       session.Config
+	providerName string
 }
 
 // UserSession is the structure representing the session of a user.
 type UserSession struct {
+	CookieDomain string
+
 	Username    string
 	DisplayName string
 	// TODO(c.michaud): move groups out of the session.
@@ -37,46 +34,52 @@ type UserSession struct {
 	FirstFactorAuthnTimestamp  int64
 	SecondFactorAuthnTimestamp int64
 
-	// Webauthn holds the session registration data for this session.
-	Webauthn *webauthn.SessionData
+	AuthenticationMethodRefs oidc.AuthenticationMethodsReferences
 
-	// Represent an OIDC workflow session initiated by the client if not null.
-	OIDCWorkflowSession *OIDCWorkflowSession
+	// WebAuthn holds the session registration data for this session.
+	WebAuthn *WebAuthn
+	TOTP     *TOTP
 
 	// This boolean is set to true after identity verification and checked
 	// while doing the query actually updating the password.
 	PasswordResetUsername *string
 
 	RefreshTTL time.Time
+
+	Elevations Elevations
 }
 
-// Identity identity of the user who is being verified.
+// TOTP holds the TOTP registration session data.
+type TOTP struct {
+	Issuer    string
+	Algorithm string
+	Digits    uint32
+	Period    uint
+	Secret    string
+	Expires   time.Time
+}
+
+// WebAuthn holds the standard WebAuthn session data plus some extra.
+type WebAuthn struct {
+	*webauthn.SessionData
+	Description string `json:"description"`
+}
+
+// Identity of the user who is being verified.
 type Identity struct {
-	Username string
-	Email    string
+	Username    string
+	Email       string
+	DisplayName string
 }
 
-// OIDCWorkflowSession represent an OIDC workflow session.
-type OIDCWorkflowSession struct {
-	ClientID                   string
-	RequestedScopes            []string
-	GrantedScopes              []string
-	RequestedAudience          []string
-	GrantedAudience            []string
-	TargetURI                  string
-	AuthURI                    string
-	RequiredAuthorizationLevel authorization.Level
-	CreatedTimestamp           int64
+// Elevations describes various session elevations.
+type Elevations struct {
+	User *Elevation
 }
 
-func newRedisLogger() *redisLogger {
-	return &redisLogger{logger: logging.Logger()}
-}
-
-type redisLogger struct {
-	logger *logrus.Logger
-}
-
-func (l *redisLogger) Printf(_ context.Context, format string, v ...interface{}) {
-	l.logger.Tracef(format, v...)
+// Elevation is an individual elevation.
+type Elevation struct {
+	ID       int
+	RemoteIP net.IP
+	Expires  time.Time
 }

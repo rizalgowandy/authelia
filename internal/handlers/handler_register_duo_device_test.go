@@ -5,14 +5,16 @@ import (
 	"net/url"
 	"testing"
 
-	"github.com/golang/mock/gomock"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
+	"github.com/valyala/fasthttp"
+	"go.uber.org/mock/gomock"
 
 	"github.com/authelia/authelia/v4/internal/duo"
 	"github.com/authelia/authelia/v4/internal/mocks"
 	"github.com/authelia/authelia/v4/internal/model"
+	"github.com/authelia/authelia/v4/internal/session"
 )
 
 type RegisterDuoDeviceSuite struct {
@@ -22,10 +24,11 @@ type RegisterDuoDeviceSuite struct {
 
 func (s *RegisterDuoDeviceSuite) SetupTest() {
 	s.mock = mocks.NewMockAutheliaCtx(s.T())
-	userSession := s.mock.Ctx.GetSession()
-	userSession.Username = testUsername
-	err := s.mock.Ctx.SaveSession(userSession)
+	userSession, err := s.mock.Ctx.GetSession()
 	s.Assert().NoError(err)
+
+	userSession.Username = testUsername
+	s.NoError(s.mock.Ctx.SaveSession(userSession))
 }
 
 func (s *RegisterDuoDeviceSuite) TearDownTest() {
@@ -38,12 +41,12 @@ func (s *RegisterDuoDeviceSuite) TestShouldCallDuoAPIAndFail() {
 	values := url.Values{}
 	values.Set("username", "john")
 
-	duoMock.EXPECT().PreAuthCall(s.mock.Ctx, gomock.Eq(values)).Return(nil, fmt.Errorf("Connnection error"))
+	duoMock.EXPECT().PreAuthCall(s.mock.Ctx, &session.UserSession{CookieDomain: "example.com", Username: "john"}, gomock.Eq(values)).Return(nil, fmt.Errorf("Connection error"))
 
-	SecondFactorDuoDevicesGet(duoMock)(s.mock.Ctx)
+	DuoDevicesGET(duoMock)(s.mock.Ctx)
 
 	s.mock.Assert200KO(s.T(), "Authentication failed, please retry later.")
-	assert.Equal(s.T(), "duo PreAuth API errored: Connnection error", s.mock.Hook.LastEntry().Message)
+	assert.Equal(s.T(), "duo PreAuth API errored: Connection error", s.mock.Hook.LastEntry().Message)
 	assert.Equal(s.T(), logrus.ErrorLevel, s.mock.Hook.LastEntry().Level)
 }
 
@@ -68,9 +71,9 @@ func (s *RegisterDuoDeviceSuite) TestShouldRespondWithSelection() {
 	response.Result = auth
 	response.Devices = duoDevices
 
-	duoMock.EXPECT().PreAuthCall(s.mock.Ctx, gomock.Eq(values)).Return(&response, nil)
+	duoMock.EXPECT().PreAuthCall(s.mock.Ctx, &session.UserSession{CookieDomain: "example.com", Username: "john"}, gomock.Eq(values)).Return(&response, nil)
 
-	SecondFactorDuoDevicesGet(duoMock)(s.mock.Ctx)
+	DuoDevicesGET(duoMock)(s.mock.Ctx)
 
 	s.mock.Assert200OK(s.T(), DuoDevicesResponse{Result: auth, Devices: apiDevices})
 }
@@ -84,9 +87,9 @@ func (s *RegisterDuoDeviceSuite) TestShouldRespondWithAllowOnBypass() {
 	response := duo.PreAuthResponse{}
 	response.Result = allow
 
-	duoMock.EXPECT().PreAuthCall(s.mock.Ctx, gomock.Eq(values)).Return(&response, nil)
+	duoMock.EXPECT().PreAuthCall(s.mock.Ctx, &session.UserSession{CookieDomain: "example.com", Username: "john"}, gomock.Eq(values)).Return(&response, nil)
 
-	SecondFactorDuoDevicesGet(duoMock)(s.mock.Ctx)
+	DuoDevicesGET(duoMock)(s.mock.Ctx)
 
 	s.mock.Assert200OK(s.T(), DuoDevicesResponse{Result: allow})
 }
@@ -103,9 +106,9 @@ func (s *RegisterDuoDeviceSuite) TestShouldRespondWithEnroll() {
 	response.Result = enroll
 	response.EnrollPortalURL = enrollURL
 
-	duoMock.EXPECT().PreAuthCall(s.mock.Ctx, gomock.Eq(values)).Return(&response, nil)
+	duoMock.EXPECT().PreAuthCall(s.mock.Ctx, &session.UserSession{CookieDomain: "example.com", Username: "john"}, gomock.Eq(values)).Return(&response, nil)
 
-	SecondFactorDuoDevicesGet(duoMock)(s.mock.Ctx)
+	DuoDevicesGET(duoMock)(s.mock.Ctx)
 
 	s.mock.Assert200OK(s.T(), DuoDevicesResponse{Result: enroll, EnrollURL: enrollURL})
 }
@@ -119,9 +122,9 @@ func (s *RegisterDuoDeviceSuite) TestShouldRespondWithDeny() {
 	response := duo.PreAuthResponse{}
 	response.Result = deny
 
-	duoMock.EXPECT().PreAuthCall(s.mock.Ctx, gomock.Eq(values)).Return(&response, nil)
+	duoMock.EXPECT().PreAuthCall(s.mock.Ctx, &session.UserSession{CookieDomain: "example.com", Username: "john"}, gomock.Eq(values)).Return(&response, nil)
 
-	SecondFactorDuoDevicesGet(duoMock)(s.mock.Ctx)
+	DuoDevicesGET(duoMock)(s.mock.Ctx)
 
 	s.mock.Assert200OK(s.T(), DuoDevicesResponse{Result: deny})
 }
@@ -132,15 +135,15 @@ func (s *RegisterDuoDeviceSuite) TestShouldRespondOK() {
 		SavePreferredDuoDevice(gomock.Eq(s.mock.Ctx), gomock.Eq(model.DuoDevice{Username: "john", Device: "1234567890123456", Method: "push"})).
 		Return(nil)
 
-	SecondFactorDuoDevicePost(s.mock.Ctx)
+	DuoDevicePOST(s.mock.Ctx)
 
-	assert.Equal(s.T(), 200, s.mock.Ctx.Response.StatusCode())
+	assert.Equal(s.T(), fasthttp.StatusOK, s.mock.Ctx.Response.StatusCode())
 }
 
 func (s *RegisterDuoDeviceSuite) TestShouldRespondKOOnInvalidMethod() {
 	s.mock.Ctx.Request.SetBodyString("{\"device\":\"1234567890123456\", \"method\":\"testfailure\"}")
 
-	SecondFactorDuoDevicePost(s.mock.Ctx)
+	DuoDevicePOST(s.mock.Ctx)
 
 	s.mock.Assert200KO(s.T(), "Authentication failed, please retry later.")
 	assert.Equal(s.T(), logrus.ErrorLevel, s.mock.Hook.LastEntry().Level)
@@ -149,7 +152,7 @@ func (s *RegisterDuoDeviceSuite) TestShouldRespondKOOnInvalidMethod() {
 func (s *RegisterDuoDeviceSuite) TestShouldRespondKOOnEmptyMethod() {
 	s.mock.Ctx.Request.SetBodyString("{\"device\":\"1234567890123456\", \"method\":\"\"}")
 
-	SecondFactorDuoDevicePost(s.mock.Ctx)
+	DuoDevicePOST(s.mock.Ctx)
 
 	s.mock.Assert200KO(s.T(), "Authentication failed, please retry later.")
 	assert.Equal(s.T(), "unable to validate body: method: non zero value required", s.mock.Hook.LastEntry().Message)
@@ -159,7 +162,7 @@ func (s *RegisterDuoDeviceSuite) TestShouldRespondKOOnEmptyMethod() {
 func (s *RegisterDuoDeviceSuite) TestShouldRespondKOOnEmptyDevice() {
 	s.mock.Ctx.Request.SetBodyString("{\"device\":\"\", \"method\":\"push\"}")
 
-	SecondFactorDuoDevicePost(s.mock.Ctx)
+	DuoDevicePOST(s.mock.Ctx)
 
 	s.mock.Assert200KO(s.T(), "Authentication failed, please retry later.")
 	assert.Equal(s.T(), "unable to validate body: device: non zero value required", s.mock.Hook.LastEntry().Message)

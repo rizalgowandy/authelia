@@ -14,12 +14,11 @@ type PasswordComplexityScenario struct {
 }
 
 func NewPasswordComplexityScenario() *PasswordComplexityScenario {
-	return &PasswordComplexityScenario{RodSuite: new(RodSuite)}
+	return &PasswordComplexityScenario{RodSuite: NewRodSuite("")}
 }
 
 func (s *PasswordComplexityScenario) SetupSuite() {
-	browser, err := StartRod()
-
+	browser, err := NewRodSession(RodSessionWithCredentials(s))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -52,12 +51,11 @@ func (s *PasswordComplexityScenario) TestShouldRejectPasswordReset() {
 		s.collectScreenshot(ctx.Err(), s.Page)
 	}()
 
-	s.doVisit(s.T(), s.Context(ctx), GetLoginBaseURL())
+	s.doVisit(s.T(), s.Context(ctx), GetLoginBaseURL(BaseDomain))
 	s.verifyIsFirstFactorPage(s.T(), s.Context(ctx))
 
 	// Attempt to reset the password to a.
 	s.doResetPassword(s.T(), s.Context(ctx), "john", "a", "a", true)
-	s.verifyNotificationDisplayed(s.T(), s.Context(ctx), "Your supplied password does not meet the password policy requirements.")
 }
 
 func TestRunPasswordComplexityScenario(t *testing.T) {

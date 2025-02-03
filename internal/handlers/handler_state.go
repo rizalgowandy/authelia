@@ -2,19 +2,34 @@ package handlers
 
 import (
 	"github.com/authelia/authelia/v4/internal/middlewares"
+	"github.com/authelia/authelia/v4/internal/session"
 )
 
-// StateGet is the handler serving the user state.
-func StateGet(ctx *middlewares.AutheliaCtx) {
-	userSession := ctx.GetSession()
-	stateResponse := StateResponse{
-		Username:              userSession.Username,
-		AuthenticationLevel:   userSession.AuthenticationLevel,
-		DefaultRedirectionURL: ctx.Configuration.DefaultRedirectionURL,
+// StateGET is the handler serving the user state.
+func StateGET(ctx *middlewares.AutheliaCtx) {
+	var (
+		userSession session.UserSession
+		err         error
+	)
+
+	if userSession, err = ctx.GetSession(); err != nil {
+		ctx.Logger.WithError(err).Error("Error occurred retrieving user session")
+
+		ctx.ReplyForbidden()
+
+		return
 	}
 
-	err := ctx.SetJSONBody(stateResponse)
-	if err != nil {
+	stateResponse := StateResponse{
+		Username:            userSession.Username,
+		AuthenticationLevel: userSession.AuthenticationLevel,
+	}
+
+	if uri := ctx.GetDefaultRedirectionURL(); uri != nil {
+		stateResponse.DefaultRedirectionURL = uri.String()
+	}
+
+	if err = ctx.SetJSONBody(stateResponse); err != nil {
 		ctx.Logger.Errorf("Unable to set state response in body: %s", err)
 	}
 }

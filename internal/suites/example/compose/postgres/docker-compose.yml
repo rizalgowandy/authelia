@@ -1,12 +1,11 @@
 ---
-version: "3"
 services:
   postgres:
-    image: postgres:14
+    image: 'postgres:17'
     environment:
-      - POSTGRES_PASSWORD=password
-      - POSTGRES_USER=admin
-      - POSTGRES_DB=authelia
+      POSTGRES_PASSWORD: 'password'
+      POSTGRES_USER: 'admin'
+      POSTGRES_DB: 'authelia'
     networks:
-      - authelianet
+      authelianet: {}
 ...

@@ -2,11 +2,13 @@ package handlers
 
 import (
 	"fmt"
+	"net/url"
 	"testing"
 
-	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
+	"github.com/valyala/fasthttp"
+	"go.uber.org/mock/gomock"
 
 	"github.com/authelia/authelia/v4/internal/authentication"
 	"github.com/authelia/authelia/v4/internal/authorization"
@@ -31,10 +33,10 @@ func (s *FirstFactorSuite) TearDownTest() {
 }
 
 func (s *FirstFactorSuite) TestShouldFailIfBodyIsNil() {
-	FirstFactorPost(nil)(s.mock.Ctx)
+	FirstFactorPOST(nil)(s.mock.Ctx)
 
 	// No body.
-	assert.Equal(s.T(), "Failed to parse 1FA request body: unable to parse body: unexpected end of JSON input", s.mock.Hook.LastEntry().Message)
+	AssertLogEntryMessageAndError(s.T(), s.mock.Hook.LastEntry(), "Failed to parse 1FA request body", "unable to parse body: unexpected end of JSON input")
 	s.mock.Assert401KO(s.T(), "Authentication failed. Check your credentials.")
 }
 
@@ -43,13 +45,18 @@ func (s *FirstFactorSuite) TestShouldFailIfBodyIsInBadFormat() {
 	s.mock.Ctx.Request.SetBodyString(`{
 		"username": "test"
 	}`)
-	FirstFactorPost(nil)(s.mock.Ctx)
+	FirstFactorPOST(nil)(s.mock.Ctx)
 
-	assert.Equal(s.T(), "Failed to parse 1FA request body: unable to validate body: password: non zero value required", s.mock.Hook.LastEntry().Message)
+	AssertLogEntryMessageAndError(s.T(), s.mock.Hook.LastEntry(), "Failed to parse 1FA request body", "unable to validate body: password: non zero value required")
 	s.mock.Assert401KO(s.T(), "Authentication failed. Check your credentials.")
 }
 
 func (s *FirstFactorSuite) TestShouldFailIfUserProviderCheckPasswordFail() {
+	s.mock.UserProviderMock.
+		EXPECT().
+		GetDetails(gomock.Eq("test")).
+		Return(&authentication.UserDetails{Username: "test"}, nil)
+
 	s.mock.UserProviderMock.
 		EXPECT().
 		CheckUserPassword(gomock.Eq("test"), gomock.Eq("hello")).
@@ -71,13 +78,19 @@ func (s *FirstFactorSuite) TestShouldFailIfUserProviderCheckPasswordFail() {
 		"password": "hello",
 		"keepMeLoggedIn": true
 	}`)
-	FirstFactorPost(nil)(s.mock.Ctx)
+	FirstFactorPOST(nil)(s.mock.Ctx)
 
-	assert.Equal(s.T(), "Unsuccessful 1FA authentication attempt by user 'test': failed", s.mock.Hook.LastEntry().Message)
+	AssertLogEntryMessageAndError(s.T(), s.mock.Hook.LastEntry(), "Unsuccessful 1FA authentication attempt by user 'test'", "failed")
+
 	s.mock.Assert401KO(s.T(), "Authentication failed. Check your credentials.")
 }
 
 func (s *FirstFactorSuite) TestShouldCheckAuthenticationIsNotMarkedWhenProviderCheckPasswordError() {
+	s.mock.UserProviderMock.
+		EXPECT().
+		GetDetails(gomock.Eq("test")).
+		Return(&authentication.UserDetails{Username: "test"}, nil)
+
 	s.mock.UserProviderMock.
 		EXPECT().
 		CheckUserPassword(gomock.Eq("test"), gomock.Eq("hello")).
@@ -100,10 +113,15 @@ func (s *FirstFactorSuite) TestShouldCheckAuthenticationIsNotMarkedWhenProviderC
 		"keepMeLoggedIn": true
 	}`)
 
-	FirstFactorPost(nil)(s.mock.Ctx)
+	FirstFactorPOST(nil)(s.mock.Ctx)
 }
 
 func (s *FirstFactorSuite) TestShouldCheckAuthenticationIsMarkedWhenInvalidCredentials() {
+	s.mock.UserProviderMock.
+		EXPECT().
+		GetDetails(gomock.Eq("test")).
+		Return(&authentication.UserDetails{Username: "test"}, nil)
+
 	s.mock.UserProviderMock.
 		EXPECT().
 		CheckUserPassword(gomock.Eq("test"), gomock.Eq("hello")).
@@ -126,20 +144,10 @@ func (s *FirstFactorSuite) TestShouldCheckAuthenticationIsMarkedWhenInvalidCrede
 		"keepMeLoggedIn": true
 	}`)
 
-	FirstFactorPost(nil)(s.mock.Ctx)
+	FirstFactorPOST(nil)(s.mock.Ctx)
 }
 
 func (s *FirstFactorSuite) TestShouldFailIfUserProviderGetDetailsFail() {
-	s.mock.UserProviderMock.
-		EXPECT().
-		CheckUserPassword(gomock.Eq("test"), gomock.Eq("hello")).
-		Return(true, nil)
-
-	s.mock.StorageMock.
-		EXPECT().
-		AppendAuthenticationLog(s.mock.Ctx, gomock.Any()).
-		Return(nil)
-
 	s.mock.UserProviderMock.
 		EXPECT().
 		GetDetails(gomock.Eq("test")).
@@ -150,13 +158,18 @@ func (s *FirstFactorSuite) TestShouldFailIfUserProviderGetDetailsFail() {
 		"password": "hello",
 		"keepMeLoggedIn": true
 	}`)
-	FirstFactorPost(nil)(s.mock.Ctx)
+	FirstFactorPOST(nil)(s.mock.Ctx)
 
-	assert.Equal(s.T(), "Could not obtain profile details during 1FA authentication for user 'test': failed", s.mock.Hook.LastEntry().Message)
+	AssertLogEntryMessageAndError(s.T(), s.mock.Hook.LastEntry(), "Error occurred getting details for user with username input 'test' which usually indicates they do not exist", "failed")
 	s.mock.Assert401KO(s.T(), "Authentication failed. Check your credentials.")
 }
 
 func (s *FirstFactorSuite) TestShouldFailIfAuthenticationMarkFail() {
+	s.mock.UserProviderMock.
+		EXPECT().
+		GetDetails(gomock.Eq("test")).
+		Return(&authentication.UserDetails{Username: "test"}, nil)
+
 	s.mock.UserProviderMock.
 		EXPECT().
 		CheckUserPassword(gomock.Eq("test"), gomock.Eq("hello")).
@@ -172,9 +185,9 @@ func (s *FirstFactorSuite) TestShouldFailIfAuthenticationMarkFail() {
 		"password": "hello",
 		"keepMeLoggedIn": true
 	}`)
-	FirstFactorPost(nil)(s.mock.Ctx)
+	FirstFactorPOST(nil)(s.mock.Ctx)
 
-	assert.Equal(s.T(), "Unable to mark 1FA authentication attempt by user 'test': failed", s.mock.Hook.LastEntry().Message)
+	AssertLogEntryMessageAndError(s.T(), s.mock.Hook.LastEntry(), "Unable to mark 1FA authentication attempt by user 'test'", "failed")
 	s.mock.Assert401KO(s.T(), "Authentication failed. Check your credentials.")
 }
 
@@ -203,19 +216,20 @@ func (s *FirstFactorSuite) TestShouldAuthenticateUserWithRememberMeChecked() {
 		"password": "hello",
 		"keepMeLoggedIn": true
 	}`)
-	FirstFactorPost(nil)(s.mock.Ctx)
+	FirstFactorPOST(nil)(s.mock.Ctx)
 
 	// Respond with 200.
-	assert.Equal(s.T(), 200, s.mock.Ctx.Response.StatusCode())
+	assert.Equal(s.T(), fasthttp.StatusOK, s.mock.Ctx.Response.StatusCode())
 	assert.Equal(s.T(), []byte("{\"status\":\"OK\"}"), s.mock.Ctx.Response.Body())
 
-	// And store authentication in session.
-	session := s.mock.Ctx.GetSession()
-	assert.Equal(s.T(), "test", session.Username)
-	assert.Equal(s.T(), true, session.KeepMeLoggedIn)
-	assert.Equal(s.T(), authentication.OneFactor, session.AuthenticationLevel)
-	assert.Equal(s.T(), []string{"test@example.com"}, session.Emails)
-	assert.Equal(s.T(), []string{"dev", "admins"}, session.Groups)
+	userSession, err := s.mock.Ctx.GetSession()
+	s.Assert().NoError(err)
+
+	assert.Equal(s.T(), "test", userSession.Username)
+	assert.Equal(s.T(), true, userSession.KeepMeLoggedIn)
+	assert.Equal(s.T(), authentication.OneFactor, userSession.AuthenticationLevel)
+	assert.Equal(s.T(), []string{"test@example.com"}, userSession.Emails)
+	assert.Equal(s.T(), []string{"dev", "admins"}, userSession.Groups)
 }
 
 func (s *FirstFactorSuite) TestShouldAuthenticateUserWithRememberMeUnchecked() {
@@ -244,25 +258,63 @@ func (s *FirstFactorSuite) TestShouldAuthenticateUserWithRememberMeUnchecked() {
 		"requestMethod": "GET",
 		"keepMeLoggedIn": false
 	}`)
-	FirstFactorPost(nil)(s.mock.Ctx)
+	FirstFactorPOST(nil)(s.mock.Ctx)
 
 	// Respond with 200.
-	assert.Equal(s.T(), 200, s.mock.Ctx.Response.StatusCode())
+	assert.Equal(s.T(), fasthttp.StatusOK, s.mock.Ctx.Response.StatusCode())
 	assert.Equal(s.T(), []byte("{\"status\":\"OK\"}"), s.mock.Ctx.Response.Body())
 
-	// And store authentication in session.
-	session := s.mock.Ctx.GetSession()
-	assert.Equal(s.T(), "test", session.Username)
-	assert.Equal(s.T(), false, session.KeepMeLoggedIn)
-	assert.Equal(s.T(), authentication.OneFactor, session.AuthenticationLevel)
-	assert.Equal(s.T(), []string{"test@example.com"}, session.Emails)
-	assert.Equal(s.T(), []string{"dev", "admins"}, session.Groups)
+	userSession, err := s.mock.Ctx.GetSession()
+	s.Assert().NoError(err)
+
+	assert.Equal(s.T(), "test", userSession.Username)
+	assert.Equal(s.T(), false, userSession.KeepMeLoggedIn)
+	assert.Equal(s.T(), authentication.OneFactor, userSession.AuthenticationLevel)
+	assert.Equal(s.T(), []string{"test@example.com"}, userSession.Emails)
+	assert.Equal(s.T(), []string{"dev", "admins"}, userSession.Groups)
+}
+
+func (s *FirstFactorSuite) TestShouldAuthenticateUserWithEmailAsUsernameInput() {
+	gomock.InOrder(
+		s.mock.UserProviderMock.
+			EXPECT().
+			GetDetails(gomock.Eq("test@example.com")).
+			Return(&authentication.UserDetails{
+				Username: "test",
+				Emails:   []string{"test@example.com"},
+				Groups:   []string{"dev", "admins"},
+			}, nil),
+		s.mock.UserProviderMock.
+			EXPECT().
+			CheckUserPassword(gomock.Eq("test"), gomock.Eq("hello")).
+			Return(true, nil),
+		s.mock.StorageMock.
+			EXPECT().
+			AppendAuthenticationLog(s.mock.Ctx, gomock.Eq(model.AuthenticationAttempt{Time: s.mock.Clock.Now(), Successful: true, Username: "test", Type: regulation.AuthType1FA, RemoteIP: model.NewNullIP(s.mock.Ctx.RemoteIP())})).
+			Return(nil),
+	)
+
+	s.mock.Ctx.Request.SetBodyString(`{"username":"test@example.com","password":"hello","requestMethod":"GET","keepMeLoggedIn":false}`)
+	FirstFactorPOST(nil)(s.mock.Ctx)
+
+	// Respond with 200.
+	s.Equal(fasthttp.StatusOK, s.mock.Ctx.Response.StatusCode())
+	s.Equal([]byte("{\"status\":\"OK\"}"), s.mock.Ctx.Response.Body())
+
+	userSession, err := s.mock.Ctx.GetSession()
+	s.Assert().NoError(err)
+
+	s.Equal("test", userSession.Username)
+	s.Equal(false, userSession.KeepMeLoggedIn)
+	s.Equal(authentication.OneFactor, userSession.AuthenticationLevel)
+	s.Equal([]string{"test@example.com"}, userSession.Emails)
+	s.Equal([]string{"dev", "admins"}, userSession.Groups)
 }
 
 func (s *FirstFactorSuite) TestShouldSaveUsernameFromAuthenticationBackendInSession() {
 	s.mock.UserProviderMock.
 		EXPECT().
-		CheckUserPassword(gomock.Eq("test"), gomock.Eq("hello")).
+		CheckUserPassword(gomock.Eq("Test"), gomock.Eq("hello")).
 		Return(true, nil)
 
 	s.mock.UserProviderMock.
@@ -288,19 +340,20 @@ func (s *FirstFactorSuite) TestShouldSaveUsernameFromAuthenticationBackendInSess
 		"requestMethod": "GET",
 		"keepMeLoggedIn": true
 	}`)
-	FirstFactorPost(nil)(s.mock.Ctx)
+	FirstFactorPOST(nil)(s.mock.Ctx)
 
 	// Respond with 200.
-	assert.Equal(s.T(), 200, s.mock.Ctx.Response.StatusCode())
+	assert.Equal(s.T(), fasthttp.StatusOK, s.mock.Ctx.Response.StatusCode())
 	assert.Equal(s.T(), []byte("{\"status\":\"OK\"}"), s.mock.Ctx.Response.Body())
 
-	// And store authentication in session.
-	session := s.mock.Ctx.GetSession()
-	assert.Equal(s.T(), "Test", session.Username)
-	assert.Equal(s.T(), true, session.KeepMeLoggedIn)
-	assert.Equal(s.T(), authentication.OneFactor, session.AuthenticationLevel)
-	assert.Equal(s.T(), []string{"test@example.com"}, session.Emails)
-	assert.Equal(s.T(), []string{"dev", "admins"}, session.Groups)
+	userSession, err := s.mock.Ctx.GetSession()
+	s.Assert().NoError(err)
+
+	assert.Equal(s.T(), "Test", userSession.Username)
+	assert.Equal(s.T(), true, userSession.KeepMeLoggedIn)
+	assert.Equal(s.T(), authentication.OneFactor, userSession.AuthenticationLevel)
+	assert.Equal(s.T(), []string{"test@example.com"}, userSession.Emails)
+	assert.Equal(s.T(), []string{"dev", "admins"}, userSession.Groups)
 }
 
 type FirstFactorRedirectionSuite struct {
@@ -311,9 +364,9 @@ type FirstFactorRedirectionSuite struct {
 
 func (s *FirstFactorRedirectionSuite) SetupTest() {
 	s.mock = mocks.NewMockAutheliaCtx(s.T())
-	s.mock.Ctx.Configuration.DefaultRedirectionURL = "https://default.local"
-	s.mock.Ctx.Configuration.AccessControl.DefaultPolicy = "bypass"
-	s.mock.Ctx.Configuration.AccessControl.Rules = []schema.ACLRule{
+	s.mock.Ctx.Configuration.Session.Cookies[0].DefaultRedirectionURL = &url.URL{Scheme: "https", Host: "default.local"}
+	s.mock.Ctx.Configuration.AccessControl.DefaultPolicy = testBypass
+	s.mock.Ctx.Configuration.AccessControl.Rules = []schema.AccessControlRule{
 		{
 			Domains: []string{"default.local"},
 			Policy:  "one_factor",
@@ -346,11 +399,14 @@ func (s *FirstFactorRedirectionSuite) TearDownTest() {
 }
 
 // When:
-//   1/ the target url is unknown
-//   2/ two_factor is disabled (no policy is set to two_factor)
-//   3/ default_redirect_url is provided
+//
+//	1/ the target url is unknown
+//	2/ two_factor is disabled (no policy is set to two_factor)
+//	3/ default_redirect_url is provided
+//
 // Then:
-//   the user should be redirected to the default url.
+//
+//	the user should be redirected to the default url.
 func (s *FirstFactorRedirectionSuite) TestShouldRedirectToDefaultURLWhenNoTargetURLProvidedAndTwoFactorDisabled() {
 	s.mock.Ctx.Request.SetBodyString(`{
 		"username": "test",
@@ -358,18 +414,21 @@ func (s *FirstFactorRedirectionSuite) TestShouldRedirectToDefaultURLWhenNoTarget
 		"requestMethod": "GET",
 		"keepMeLoggedIn": false
 	}`)
-	FirstFactorPost(nil)(s.mock.Ctx)
+	FirstFactorPOST(nil)(s.mock.Ctx)
 
 	// Respond with 200.
-	s.mock.Assert200OK(s.T(), redirectResponse{Redirect: "https://default.local"})
+	s.mock.Assert200OK(s.T(), &redirectResponse{Redirect: "https://www.example.com"})
 }
 
 // When:
-//   1/ the target url is unsafe
-//   2/ two_factor is disabled (no policy is set to two_factor)
-//   3/ default_redirect_url is provided
+//
+//	1/ the target url is unsafe
+//	2/ two_factor is disabled (no policy is set to two_factor)
+//	3/ default_redirect_url is provided
+//
 // Then:
-//   the user should be redirected to the default url.
+//
+//	the user should be redirected to the default url.
 func (s *FirstFactorRedirectionSuite) TestShouldRedirectToDefaultURLWhenURLIsUnsafeAndTwoFactorDisabled() {
 	s.mock.Ctx.Request.SetBodyString(`{
 		"username": "test",
@@ -379,19 +438,22 @@ func (s *FirstFactorRedirectionSuite) TestShouldRedirectToDefaultURLWhenURLIsUns
 		"targetURL": "http://notsafe.local"
 	}`)
 
-	FirstFactorPost(nil)(s.mock.Ctx)
+	FirstFactorPOST(nil)(s.mock.Ctx)
 
 	// Respond with 200.
-	s.mock.Assert200OK(s.T(), redirectResponse{Redirect: "https://default.local"})
+	s.mock.Assert200OK(s.T(), &redirectResponse{Redirect: "https://www.example.com"})
 }
 
 // When:
-//   1/ two_factor is enabled (default policy)
+//
+//	1/ two_factor is enabled (default policy)
+//
 // Then:
-//   the user should receive 200 without redirection URL.
+//
+//	the user should receive 200 without redirection URL.
 func (s *FirstFactorRedirectionSuite) TestShouldReply200WhenNoTargetURLProvidedAndTwoFactorEnabled() {
 	s.mock.Ctx.Providers.Authorizer = authorization.NewAuthorizer(&schema.Configuration{
-		AccessControl: schema.AccessControlConfiguration{
+		AccessControl: schema.AccessControl{
 			DefaultPolicy: "two_factor",
 		},
 	})
@@ -402,21 +464,24 @@ func (s *FirstFactorRedirectionSuite) TestShouldReply200WhenNoTargetURLProvidedA
 		"keepMeLoggedIn": false
 	}`)
 
-	FirstFactorPost(nil)(s.mock.Ctx)
+	FirstFactorPOST(nil)(s.mock.Ctx)
 
 	// Respond with 200.
 	s.mock.Assert200OK(s.T(), nil)
 }
 
 // When:
-//   1/ two_factor is enabled (some rule)
+//
+//	1/ two_factor is enabled (some rule)
+//
 // Then:
-//   the user should receive 200 without redirection URL.
+//
+//	the user should receive 200 without redirection URL.
 func (s *FirstFactorRedirectionSuite) TestShouldReply200WhenUnsafeTargetURLProvidedAndTwoFactorEnabled() {
 	s.mock.Ctx.Providers.Authorizer = authorization.NewAuthorizer(&schema.Configuration{
-		AccessControl: schema.AccessControlConfiguration{
+		AccessControl: schema.AccessControl{
 			DefaultPolicy: "one_factor",
-			Rules: []schema.ACLRule{
+			Rules: []schema.AccessControlRule{
 				{
 					Domains: []string{"test.example.com"},
 					Policy:  "one_factor",
@@ -434,7 +499,7 @@ func (s *FirstFactorRedirectionSuite) TestShouldReply200WhenUnsafeTargetURLProvi
 		"keepMeLoggedIn": false
 	}`)
 
-	FirstFactorPost(nil)(s.mock.Ctx)
+	FirstFactorPOST(nil)(s.mock.Ctx)
 
 	// Respond with 200.
 	s.mock.Assert200OK(s.T(), nil)

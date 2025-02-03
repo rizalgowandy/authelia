@@ -6,18 +6,21 @@ import (
 	"github.com/valyala/fasthttp"
 )
 
-// StripPathMiddleware strips the first level of a path.
-func StripPathMiddleware(path string, next fasthttp.RequestHandler) fasthttp.RequestHandler {
-	return func(ctx *fasthttp.RequestCtx) {
-		uri := ctx.RequestURI()
+// StripPath strips the first level of a path.
+func StripPath(path string) (middleware Middleware) {
+	return func(next fasthttp.RequestHandler) fasthttp.RequestHandler {
+		return func(ctx *fasthttp.RequestCtx) {
+			uri := string(ctx.RequestURI())
 
-		if strings.HasPrefix(string(uri), path) {
-			ctx.SetUserValueBytes(UserValueKeyBaseURL, path)
+			if strings.HasPrefix(uri, path) {
+				ctx.SetUserValue(UserValueKeyBaseURL, path)
+				ctx.SetUserValue(UserValueKeyRawURI, uri)
 
-			newURI := strings.TrimPrefix(string(uri), path)
-			ctx.Request.SetRequestURI(newURI)
+				newURI := strings.TrimPrefix(uri, path)
+				ctx.Request.SetRequestURI(newURI)
+			}
+
+			next(ctx)
 		}
-
-		next(ctx)
 	}
 }

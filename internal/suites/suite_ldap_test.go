@@ -11,15 +11,17 @@ type LDAPSuite struct {
 }
 
 func NewLDAPSuite() *LDAPSuite {
-	return &LDAPSuite{RodSuite: new(RodSuite)}
+	return &LDAPSuite{
+		RodSuite: NewRodSuite(ldapSuiteName),
+	}
 }
 
-func (s *LDAPSuite) TestOneFactorScenario() {
-	suite.Run(s.T(), NewOneFactorScenario())
+func (s *LDAPSuite) Test1FAScenario() {
+	suite.Run(s.T(), New1FAScenario())
 }
 
-func (s *LDAPSuite) TestTwoFactorScenario() {
-	suite.Run(s.T(), NewTwoFactorScenario())
+func (s *LDAPSuite) Test2FATOTPScenario() {
+	suite.Run(s.T(), New2FATOTPScenario())
 }
 
 func (s *LDAPSuite) TestResetPassword() {

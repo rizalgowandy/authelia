@@ -60,7 +60,7 @@ if [[ $MODIFIED == "false" ]]; then
 fi
 
 echo "Generating SSL certificate for *.$DOMAIN"
-sudo docker run -a stdout -v $PWD/traefik/certs:/tmp/certs authelia/authelia authelia certificates generate --host *.$DOMAIN --dir /tmp/certs/ > /dev/null
+sudo docker run -a stdout -v $PWD/traefik/certs:/tmp/certs authelia/authelia authelia crypto certificate rsa generate --common-name="*.${DOMAIN}" --directory=/tmp/certs/ > /dev/null
 
 if [[ $DOMAIN != "example.com" ]]; then
   if [[ $(uname) == "Darwin" ]]; then
@@ -99,7 +99,7 @@ fi
 password
 
 if [[ $PASSWORD != "" ]]; then
-  PASSWORD=$(sudo docker run authelia/authelia authelia hash-password $PASSWORD | sed 's/Password hash: //g')
+  PASSWORD=$(sudo docker run authelia/authelia authelia crypto hash generate argon2 --password $PASSWORD | sed 's/Digest: //g')
   if [[ $(uname) == "Darwin" ]]; then
     sudo sed -i '' "s/<PASSWORD>/$(echo $PASSWORD | sed -e 's/[\/&]/\\&/g')/g" authelia/users_database.yml
   else
@@ -110,7 +110,7 @@ else
   password
 fi
 
-sudo docker-compose up -d
+sudo docker compose up -d
 
 if [[ $? != 0 ]]; then
   exit 1

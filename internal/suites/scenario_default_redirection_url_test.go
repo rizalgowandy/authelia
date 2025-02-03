@@ -12,24 +12,33 @@ import (
 
 type DefaultRedirectionURLScenario struct {
 	*RodSuite
-
-	secret string
 }
 
 func NewDefaultRedirectionURLScenario() *DefaultRedirectionURLScenario {
 	return &DefaultRedirectionURLScenario{
-		RodSuite: new(RodSuite),
+		RodSuite: NewRodSuite(""),
 	}
 }
 
 func (s *DefaultRedirectionURLScenario) SetupSuite() {
-	browser, err := StartRod()
-
+	browser, err := NewRodSession(RodSessionWithCredentials(s))
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	s.RodSession = browser
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer func() {
+		cancel()
+		s.collectScreenshot(ctx.Err(), s.Page)
+
+		s.collectCoverage(s.Page)
+		s.MustClose()
+	}()
+
+	s.Page = s.doCreateTab(s.T(), HomeBaseURL)
+	s.doLoginAndRegisterTOTP(s.T(), s.Context(ctx), "john", "password", false)
 }
 
 func (s *DefaultRedirectionURLScenario) TearDownSuite() {
@@ -59,13 +68,11 @@ func (s *DefaultRedirectionURLScenario) TestUserIsRedirectedToDefaultURL() {
 
 	targetURL := fmt.Sprintf("%s/secret.html", AdminBaseURL)
 
-	s.doVisit(s.T(), s.Context(ctx), HomeBaseURL)
-	s.verifyIsHome(s.T(), s.Page)
-	s.secret = s.doRegisterAndLogin2FA(s.T(), s.Context(ctx), "john", "password", false, targetURL)
+	s.doLoginSecondFactorTOTP(s.T(), s.Context(ctx), "john", "password", false, targetURL)
 	s.verifySecretAuthorized(s.T(), s.Context(ctx))
 	s.doLogout(s.T(), s.Context(ctx))
 
-	s.doLoginTwoFactor(s.T(), s.Context(ctx), "john", "password", false, s.secret, "")
+	s.doLoginSecondFactorTOTP(s.T(), s.Context(ctx), "john", "password", false, "")
 	s.verifyIsHome(s.T(), s.Page)
 }
 

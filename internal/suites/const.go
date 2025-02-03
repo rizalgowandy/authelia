@@ -8,16 +8,46 @@ import (
 )
 
 // BaseDomain the base domain.
-var BaseDomain = "example.com:8080"
+var (
+	BaseDomain     = "example.com:8080"
+	Example2DotCom = "example2.com:8080"
+	Example3DotCom = "example3.com:8080"
+)
 
-// PathPrefix the prefix/url_base of the login portal.
-var PathPrefix = os.Getenv("PathPrefix")
+const (
+	SHA1   = "SHA1"
+	SHA256 = "SHA256"
+	SHA512 = "SHA512"
+)
+
+// GetPathPrefix returns the prefix/url_base of the login portal.
+func GetPathPrefix() string {
+	return os.Getenv("PathPrefix")
+}
+
+// LoginBaseURLFmt the base URL of the login portal for specified baseDomain.
+func LoginBaseURLFmt(baseDomain string) string {
+	if baseDomain == "" {
+		baseDomain = BaseDomain
+	}
+
+	return fmt.Sprintf("https://login.%s", baseDomain)
+}
 
 // LoginBaseURL the base URL of the login portal.
-var LoginBaseURL = fmt.Sprintf("https://login.%s", BaseDomain)
+var LoginBaseURL = LoginBaseURLFmt(BaseDomain)
+
+// SingleFactorBaseURLFmt the base URL of the singlefactor with custom domain.
+func SingleFactorBaseURLFmt(baseDomain string) string {
+	if baseDomain == "" {
+		baseDomain = BaseDomain
+	}
+
+	return fmt.Sprintf("https://singlefactor.%s", baseDomain)
+}
 
 // SingleFactorBaseURL the base URL of the singlefactor domain.
-var SingleFactorBaseURL = fmt.Sprintf("https://singlefactor.%s", BaseDomain)
+var SingleFactorBaseURL = SingleFactorBaseURLFmt(BaseDomain)
 
 // AdminBaseURL the base URL of the admin domain.
 var AdminBaseURL = fmt.Sprintf("https://admin.%s", BaseDomain)
@@ -33,6 +63,9 @@ var PublicBaseURL = fmt.Sprintf("https://public.%s", BaseDomain)
 
 // SecureBaseURL the base URL of the secure domain.
 var SecureBaseURL = fmt.Sprintf("https://secure.%s", BaseDomain)
+
+// DenyBaseURL the base URL of the dev domain.
+var DenyBaseURL = fmt.Sprintf("https://deny.%s", BaseDomain)
 
 // DevBaseURL the base URL of the dev domain.
 var DevBaseURL = fmt.Sprintf("https://dev.%s", BaseDomain)
@@ -58,15 +91,23 @@ const (
 	testPassword = "password"
 )
 
+const (
+	envFileProd        = "/web/.env.production"
+	envFileDev         = "/web/.env.development"
+	namespaceAuthelia  = "authelia"
+	namespaceDashboard = "kubernetes-dashboard"
+	namespaceKube      = "kube-system"
+)
+
 var (
 	storageLocalTmpConfig = schema.Configuration{
-		TOTP: schema.TOTPConfiguration{
-			Issuer: "Authelia",
-			Period: 6,
+		TOTP: schema.TOTP{
+			Issuer:        "Authelia",
+			DefaultPeriod: 6,
 		},
-		Storage: schema.StorageConfiguration{
+		Storage: schema.Storage{
 			EncryptionKey: "a_not_so_secure_encryption_key",
-			Local: &schema.LocalStorageConfiguration{
+			Local: &schema.StorageLocal{
 				Path: "/tmp/db.sqlite3",
 			},
 		},

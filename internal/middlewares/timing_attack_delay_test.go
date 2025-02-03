@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/authelia/authelia/v4/internal/logging"
+	"github.com/authelia/authelia/v4/internal/random"
 )
 
 func TestTimingAttackDelayAverages(t *testing.T) {
@@ -45,10 +46,15 @@ func TestTimingAttackDelayCalculations(t *testing.T) {
 	avgExecDurationMs := 1000.0
 	expectedMinimumDelayMs := avgExecDurationMs - float64(execDuration.Milliseconds())
 
-	logger := logging.Logger().WithFields(logrus.Fields{})
+	ctx := &AutheliaCtx{
+		Logger: logging.Logger().WithFields(logrus.Fields{}),
+		Providers: Providers{
+			Random: &random.Cryptographical{},
+		},
+	}
 
 	for i := 0; i < 100; i++ {
-		delay := calculateActualDelay(logger, execDuration, avgExecDurationMs, 250, 85, false)
+		delay := calculateActualDelay(ctx, execDuration, avgExecDurationMs, 250, 85, false)
 		assert.True(t, delay >= expectedMinimumDelayMs)
 		assert.True(t, delay <= expectedMinimumDelayMs+float64(85))
 	}
@@ -58,7 +64,7 @@ func TestTimingAttackDelayCalculations(t *testing.T) {
 	expectedMinimumDelayMs = 250 - float64(execDuration.Milliseconds())
 
 	for i := 0; i < 100; i++ {
-		delay := calculateActualDelay(logger, execDuration, avgExecDurationMs, 250, 85, false)
+		delay := calculateActualDelay(ctx, execDuration, avgExecDurationMs, 250, 85, false)
 		assert.True(t, delay >= expectedMinimumDelayMs)
 		assert.True(t, delay <= expectedMinimumDelayMs+float64(250))
 	}

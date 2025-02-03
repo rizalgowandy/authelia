@@ -2,35 +2,37 @@ package regulation
 
 import (
 	"context"
-	"net"
+	"strings"
 	"time"
 
+	"github.com/authelia/authelia/v4/internal/clock"
 	"github.com/authelia/authelia/v4/internal/configuration/schema"
 	"github.com/authelia/authelia/v4/internal/model"
 	"github.com/authelia/authelia/v4/internal/storage"
-	"github.com/authelia/authelia/v4/internal/utils"
 )
 
 // NewRegulator create a regulator instance.
-func NewRegulator(config schema.RegulationConfiguration, provider storage.RegulatorProvider, clock utils.Clock) *Regulator {
+func NewRegulator(config schema.Regulation, store storage.RegulatorProvider, clock clock.Provider) *Regulator {
 	return &Regulator{
-		enabled:         config.MaxRetries > 0,
-		storageProvider: provider,
-		clock:           clock,
-		config:          config,
+		enabled: config.MaxRetries > 0,
+		store:   store,
+		clock:   clock,
+		config:  config,
 	}
 }
 
 // Mark an authentication attempt.
 // We split Mark and Regulate in order to avoid timing attacks.
-func (r *Regulator) Mark(ctx context.Context, successful, banned bool, username, requestURI, requestMethod, authType string, remoteIP net.IP) error {
-	return r.storageProvider.AppendAuthenticationLog(ctx, model.AuthenticationAttempt{
+func (r *Regulator) Mark(ctx Context, successful, banned bool, username, requestURI, requestMethod, authType string) error {
+	ctx.RecordAuthn(successful, banned, strings.ToLower(authType))
+
+	return r.store.AppendAuthenticationLog(ctx, model.AuthenticationAttempt{
 		Time:          r.clock.Now(),
 		Successful:    successful,
 		Banned:        banned,
 		Username:      username,
 		Type:          authType,
-		RemoteIP:      model.NewNullIP(remoteIP),
+		RemoteIP:      model.NewNullIP(ctx.RemoteIP()),
 		RequestURI:    requestURI,
 		RequestMethod: requestMethod,
 	})
@@ -44,7 +46,7 @@ func (r *Regulator) Regulate(ctx context.Context, username string) (time.Time, e
 		return time.Time{}, nil
 	}
 
-	attempts, err := r.storageProvider.LoadAuthenticationLogs(ctx, username, r.clock.Now().Add(-r.config.BanTime), 10, 0)
+	attempts, err := r.store.LoadAuthenticationLogs(ctx, username, r.clock.Now().Add(-r.config.BanTime), 10, 0)
 	if err != nil {
 		return time.Time{}, nil
 	}

@@ -1,19 +1,18 @@
 package utils
 
 import (
-	crand "crypto/rand"
 	"fmt"
-	"math/rand"
 	"net/url"
 	"strings"
-	"time"
 	"unicode"
+
+	"github.com/valyala/fasthttp"
 )
 
 // IsStringAbsURL checks a string can be parsed as a URL and that is IsAbs and if it can't it returns an error
 // describing why.
 func IsStringAbsURL(input string) (err error) {
-	parsedURL, err := url.Parse(input)
+	parsedURL, err := url.ParseRequestURI(input)
 	if err != nil {
 		return fmt.Errorf("could not parse '%s' as a URL", input)
 	}
@@ -25,7 +24,7 @@ func IsStringAbsURL(input string) (err error) {
 	return nil
 }
 
-// IsStringAlphaNumeric returns false if any rune in the string is not alpha-numeric.
+// IsStringAlphaNumeric returns false if any rune in the string is not alphanumeric.
 func IsStringAlphaNumeric(input string) bool {
 	for _, r := range input {
 		if !unicode.IsLetter(r) && !unicode.IsNumber(r) {
@@ -47,10 +46,10 @@ func IsStringInSlice(needle string, haystack []string) (inSlice bool) {
 	return false
 }
 
-// IsStringInSliceSuffix checks if the needle string has one of the suffixes in the haystack.
-func IsStringInSliceSuffix(needle string, haystack []string) (hasSuffix bool) {
-	for _, straw := range haystack {
-		if strings.HasSuffix(needle, straw) {
+// IsStringInSliceF checks if a single string is in a slice of strings using the provided isEqual func.
+func IsStringInSliceF(needle string, haystack []string, isEqual func(needle, item string) bool) (inSlice bool) {
+	for _, b := range haystack {
+		if isEqual(needle, b) {
 			return true
 		}
 	}
@@ -93,8 +92,13 @@ func IsStringSliceContainsAll(needles []string, haystack []string) (inSlice bool
 
 // IsStringSliceContainsAny checks if the haystack contains any of the strings in the needles.
 func IsStringSliceContainsAny(needles []string, haystack []string) (inSlice bool) {
+	return IsStringSliceContainsAnyF(needles, haystack, IsStringInSlice)
+}
+
+// IsStringSliceContainsAnyF checks if the haystack contains any of the strings in the needles using the isInSlice func.
+func IsStringSliceContainsAnyF(needles []string, haystack []string, isInSlice func(needle string, haystack []string) bool) (inSlice bool) {
 	for _, n := range needles {
-		if IsStringInSlice(n, haystack) {
+		if isInSlice(n, haystack) {
 			return true
 		}
 	}
@@ -145,6 +149,41 @@ func IsStringSlicesDifferentFold(a, b []string) (different bool) {
 	return isStringSlicesDifferent(a, b, IsStringInSliceFold)
 }
 
+// StringSliceFromURLs returns a []string from a []url.URL.
+func StringSliceFromURLs(urls []*url.URL) []string {
+	result := make([]string, len(urls))
+
+	for i := 0; i < len(urls); i++ {
+		result[i] = urls[i].String()
+	}
+
+	return result
+}
+
+// URLsFromStringSlice returns a []url.URL from a []string.
+func URLsFromStringSlice(urls []string) []*url.URL {
+	var result []*url.URL
+
+	for i := 0; i < len(urls); i++ {
+		u, err := url.Parse(urls[i])
+		if err != nil {
+			continue
+		}
+
+		result = append(result, u)
+	}
+
+	return result
+}
+
+// OriginFromURL returns an origin url.URL given another url.URL.
+func OriginFromURL(u *url.URL) (origin *url.URL) {
+	return &url.URL{
+		Scheme: u.Scheme,
+		Host:   u.Host,
+	}
+}
+
 // StringSlicesDelta takes a before and after []string and compares them returning a added and removed []string.
 func StringSlicesDelta(before, after []string) (added, removed []string) {
 	for _, s := range before {
@@ -162,37 +201,110 @@ func StringSlicesDelta(before, after []string) (added, removed []string) {
 	return added, removed
 }
 
-// RandomString returns a random string with a given length with values from the provided characters. When crypto is set
-// to false we use math/rand and when it's set to true we use crypto/rand. The crypto option should always be set to true
-// excluding when the task is time sensitive and would not benefit from extra randomness.
-func RandomString(n int, characters string, crypto bool) (randomString string) {
-	return string(RandomBytes(n, characters, crypto))
-}
-
-// RandomBytes returns a random []byte with a given length with values from the provided characters. When crypto is set
-// to false we use math/rand and when it's set to true we use crypto/rand. The crypto option should always be set to true
-// excluding when the task is time sensitive and would not benefit from extra randomness.
-func RandomBytes(n int, characters string, crypto bool) (bytes []byte) {
-	bytes = make([]byte, n)
-
-	if crypto {
-		_, _ = crand.Read(bytes)
-	} else {
-		_, _ = rand.Read(bytes) //nolint:gosec // As this is an option when using this function it's not necessary to be concerned about this.
-	}
-
-	for i, b := range bytes {
-		bytes[i] = characters[b%byte(len(characters))]
-	}
-
-	return bytes
-}
-
 // StringHTMLEscape escapes chars for a HTML body.
 func StringHTMLEscape(input string) (output string) {
 	return htmlEscaper.Replace(input)
 }
 
-func init() {
-	rand.Seed(time.Now().UnixNano())
+// StringJoinDelimitedEscaped joins a string with a specified rune delimiter after escaping any instance of that string
+// in the string slice. Used with StringSplitDelimitedEscaped.
+func StringJoinDelimitedEscaped(value []string, delimiter rune) string {
+	escaped := make([]string, len(value))
+	for k, v := range value {
+		escaped[k] = strings.ReplaceAll(v, string(delimiter), "\\"+string(delimiter))
+	}
+
+	return strings.Join(escaped, string(delimiter))
+}
+
+// StringSplitDelimitedEscaped splits a string with a specified rune delimiter after unescaping any instance of that
+// string in the string slice that has been escaped. Used with StringJoinDelimitedEscaped.
+func StringSplitDelimitedEscaped(value string, delimiter rune) (out []string) {
+	var escape bool
+
+	split := strings.FieldsFunc(value, func(r rune) bool {
+		if r == '\\' {
+			escape = !escape
+		} else if escape && r != delimiter {
+			escape = false
+		}
+
+		return !escape && r == delimiter
+	})
+
+	for k, v := range split {
+		split[k] = strings.ReplaceAll(v, "\\"+string(delimiter), string(delimiter))
+	}
+
+	return split
+}
+
+// JoinAndCanonicalizeHeaders join header strings by a given sep.
+func JoinAndCanonicalizeHeaders(sep []byte, headers ...string) (joined []byte) {
+	for i, header := range headers {
+		if i != 0 {
+			joined = append(joined, sep...)
+		}
+
+		joined = fasthttp.AppendNormalizedHeaderKey(joined, header)
+	}
+
+	return joined
+}
+
+func StringJoinOr(items []string) string {
+	return StringJoinComma("or", items)
+}
+
+func StringJoinAnd(items []string) string {
+	return StringJoinComma("and", items)
+}
+
+func StringJoinComma(word string, items []string) string {
+	if word == "" {
+		return StringJoinBuild(",", "", "'", items)
+	}
+
+	return StringJoinBuild(",", word, "'", items)
+}
+
+func StringJoinBuild(sep, sepFinal, quote string, items []string) string {
+	n := len(items)
+
+	if n == 0 {
+		return ""
+	}
+
+	b := &strings.Builder{}
+
+	for i := 0; i < n; i++ {
+		if quote != "" {
+			b.WriteString(quote)
+		}
+
+		b.WriteString(items[i])
+
+		if quote != "" {
+			b.WriteString(quote)
+		}
+
+		if i == (n - 1) {
+			continue
+		}
+
+		if sep != "" {
+			if sepFinal == "" || n != 2 {
+				b.WriteString(sep)
+			}
+
+			b.WriteString(" ")
+		}
+
+		if sepFinal != "" && i == (n-2) {
+			b.WriteString(strings.Trim(sepFinal, " "))
+			b.WriteString(" ")
+		}
+	}
+
+	return b.String()
 }

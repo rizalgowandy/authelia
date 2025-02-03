@@ -26,30 +26,40 @@ func init() {
 func main() {
 	rootCmd := &cobra.Command{
 		Use: "authelia-suites",
+
+		DisableAutoGenTag: true,
 	}
 
 	startCmd := &cobra.Command{
 		Use:   "setup [suite]",
 		Short: "Setup the suite environment",
 		Run:   setupSuite,
+
+		DisableAutoGenTag: true,
 	}
 
 	setupTimeoutCmd := &cobra.Command{
 		Use:   "timeout [suite]",
 		Short: "Run the OnSetupTimeout callback when setup times out",
 		Run:   setupTimeoutSuite,
+
+		DisableAutoGenTag: true,
 	}
 
 	errorCmd := &cobra.Command{
 		Use:   "error [suite]",
 		Short: "Run the OnError callback when some tests fail",
 		Run:   runErrorCallback,
+
+		DisableAutoGenTag: true,
 	}
 
 	stopCmd := &cobra.Command{
 		Use:   "teardown [suite]",
 		Short: "Teardown the suite environment",
 		Run:   teardownSuite,
+
+		DisableAutoGenTag: true,
 	}
 
 	rootCmd.AddCommand(startCmd)
@@ -130,9 +140,7 @@ func setupSuite(cmd *cobra.Command, args []string) {
 		log.Fatal(err)
 	}
 
-	err = s.SetUp(suiteTmpDirectory)
-
-	if err != nil {
+	if err = s.SetUp(suiteTmpDirectory); err != nil {
 		log.Error("Failure during environment deployment.")
 		teardownSuite(nil, args)
 		log.Fatal(err)

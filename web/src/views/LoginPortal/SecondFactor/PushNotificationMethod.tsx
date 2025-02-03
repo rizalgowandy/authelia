@@ -1,22 +1,26 @@
-import React, { useEffect, useCallback, useRef, useState, ReactNode } from "react";
+import React, { ReactNode, useCallback, useEffect, useRef, useState } from "react";
 
-import { Button, makeStyles } from "@material-ui/core";
+import { Button, Theme } from "@mui/material";
+import makeStyles from "@mui/styles/makeStyles";
+import { useTranslation } from "react-i18next";
 
 import FailureIcon from "@components/FailureIcon";
 import PushNotificationIcon from "@components/PushNotificationIcon";
 import SuccessIcon from "@components/SuccessIcon";
+import { RedirectionURL } from "@constants/SearchParams";
 import { useIsMountedRef } from "@hooks/Mounted";
-import { useRedirectionURL } from "@hooks/RedirectionURL";
+import { useQueryParam } from "@hooks/QueryParam";
+import { useWorkflow } from "@hooks/Workflow";
 import {
-    completePushNotificationSignIn,
-    completeDuoDeviceSelectionProcess,
     DuoDevicePostRequest,
+    completeDuoDeviceSelectionProcess,
+    completePushNotificationSignIn,
     initiateDuoDeviceSelectionProcess,
 } from "@services/PushNotification";
 import { AuthenticationLevel } from "@services/State";
 import DeviceSelectionContainer, {
-    SelectedDevice,
     SelectableDevice,
+    SelectedDevice,
 } from "@views/LoginPortal/SecondFactor/DeviceSelectionContainer";
 import MethodContainer, { State as MethodContainerState } from "@views/LoginPortal/SecondFactor/MethodContainer";
 
@@ -40,12 +44,14 @@ export interface Props {
 }
 
 const PushNotificationMethod = function (props: Props) {
-    const style = useStyles();
+    const styles = useStyles();
     const [state, setState] = useState(State.SignInInProgress);
-    const redirectionURL = useRedirectionURL();
+    const redirectionURL = useQueryParam(RedirectionURL);
+    const [workflow, workflowID] = useWorkflow();
     const mounted = useIsMountedRef();
     const [enroll_url, setEnrollUrl] = useState("");
     const [devices, setDevices] = useState([] as SelectableDevice[]);
+    const { t: translate } = useTranslation();
 
     const { onSignInSuccess, onSignInError } = props;
     const onSignInErrorCallback = useRef(onSignInError).current;
@@ -65,15 +71,15 @@ const PushNotificationMethod = function (props: Props) {
                     setState(State.Selection);
                     break;
                 case "allow":
-                    onSignInErrorCallback(new Error("Device selection was bypassed by Duo policy"));
+                    onSignInErrorCallback(new Error(translate("Device selection was bypassed by Duo policy")));
                     setState(State.Success);
                     break;
                 case "deny":
-                    onSignInErrorCallback(new Error("Device selection was denied by Duo policy"));
+                    onSignInErrorCallback(new Error(translate("Device selection was denied by Duo policy")));
                     setState(State.Failure);
                     break;
                 case "enroll":
-                    onSignInErrorCallback(new Error("No compatible device found"));
+                    onSignInErrorCallback(new Error(translate("No compatible device found")));
                     if (res.enroll_url && props.duoSelfEnrollment) setEnrollUrl(res.enroll_url);
                     setState(State.Enroll);
                     break;
@@ -81,9 +87,9 @@ const PushNotificationMethod = function (props: Props) {
         } catch (err) {
             if (!mounted.current) return;
             console.error(err);
-            onSignInErrorCallback(new Error("There was an issue fetching Duo device(s)"));
+            onSignInErrorCallback(new Error(translate("There was an issue fetching Duo device(s)")));
         }
-    }, [props.duoSelfEnrollment, mounted, onSignInErrorCallback]);
+    }, [props.duoSelfEnrollment, mounted, onSignInErrorCallback, translate]);
 
     const signInFunc = useCallback(async () => {
         if (props.authenticationLevel === AuthenticationLevel.TwoFactor) {
@@ -92,7 +98,7 @@ const PushNotificationMethod = function (props: Props) {
 
         try {
             setState(State.SignInInProgress);
-            const res = await completePushNotificationSignIn(redirectionURL);
+            const res = await completePushNotificationSignIn(redirectionURL, workflow, workflowID);
             // If the request was initiated and the user changed 2FA method in the meantime,
             // the process is interrupted to avoid updating state of unmounted component.
             if (!mounted.current) return;
@@ -106,13 +112,13 @@ const PushNotificationMethod = function (props: Props) {
                 return;
             }
             if (res && res.result === "enroll") {
-                onSignInErrorCallback(new Error("No compatible device found"));
+                onSignInErrorCallback(new Error(translate("No compatible device found")));
                 if (res.enroll_url && props.duoSelfEnrollment) setEnrollUrl(res.enroll_url);
                 setState(State.Enroll);
                 return;
             }
             if (res && res.result === "deny") {
-                onSignInErrorCallback(new Error("Device selection was denied by Duo policy"));
+                onSignInErrorCallback(new Error(translate("Device selection was denied by Duo policy")));
                 setState(State.Failure);
                 return;
             }
@@ -128,17 +134,20 @@ const PushNotificationMethod = function (props: Props) {
             if (!mounted.current || state !== State.SignInInProgress) return;
 
             console.error(err);
-            onSignInErrorCallback(new Error("There was an issue completing sign in process"));
+            onSignInErrorCallback(new Error(translate("There was an issue completing sign in process")));
             setState(State.Failure);
         }
     }, [
         props.authenticationLevel,
         props.duoSelfEnrollment,
         redirectionURL,
+        workflow,
+        workflowID,
         mounted,
         onSignInErrorCallback,
         onSignInSuccessCallback,
         state,
+        translate,
     ]);
 
     const updateDuoDevice = useCallback(
@@ -153,10 +162,10 @@ const PushNotificationMethod = function (props: Props) {
                 }
             } catch (err) {
                 console.error(err);
-                onSignInErrorCallback(new Error("There was an issue updating preferred Duo device"));
+                onSignInErrorCallback(new Error(translate("There was an issue updating preferred Duo device")));
             }
         },
-        [onSignInErrorCallback, props],
+        [onSignInErrorCallback, props, translate],
     );
 
     const handleDuoDeviceSelected = useCallback(
@@ -208,18 +217,18 @@ const PushNotificationMethod = function (props: Props) {
     return (
         <MethodContainer
             id={props.id}
-            title="Push Notification"
-            explanation="A notification has been sent to your smartphone"
+            title={translate("Push Notification")}
+            explanation={translate("A notification has been sent to your smartphone")}
             duoSelfEnrollment={enroll_url ? props.duoSelfEnrollment : false}
             registered={props.registered}
             state={methodState}
             onSelectClick={fetchDuoDevicesFunc}
             onRegisterClick={() => window.open(enroll_url, "_blank")}
         >
-            <div className={style.icon}>{icon}</div>
+            <div className={styles.icon}>{icon}</div>
             <div className={state !== State.Failure ? "hidden" : ""}>
                 <Button color="secondary" onClick={signInFunc}>
-                    Retry
+                    {translate("Retry")}
                 </Button>
             </div>
         </MethodContainer>
@@ -228,7 +237,7 @@ const PushNotificationMethod = function (props: Props) {
 
 export default PushNotificationMethod;
 
-const useStyles = makeStyles(() => ({
+const useStyles = makeStyles((theme: Theme) => ({
     icon: {
         width: "64px",
         height: "64px",

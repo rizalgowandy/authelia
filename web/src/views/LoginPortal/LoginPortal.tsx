@@ -1,6 +1,7 @@
-import React, { Fragment, ReactNode, useCallback, useEffect, useState } from "react";
+import React, { Fragment, ReactNode, lazy, useEffect, useState } from "react";
 
-import { Route, Routes, useLocation, useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
+import { Route, Routes, useLocation } from "react-router-dom";
 
 import {
     AuthenticatedRoute,
@@ -8,46 +9,52 @@ import {
     SecondFactorPushSubRoute,
     SecondFactorRoute,
     SecondFactorTOTPSubRoute,
-    SecondFactorWebauthnSubRoute,
+    SecondFactorWebAuthnSubRoute,
 } from "@constants/Routes";
+import { RedirectionURL } from "@constants/SearchParams";
+import { useLocalStorageMethodContext } from "@contexts/LocalStorageMethodContext";
 import { useConfiguration } from "@hooks/Configuration";
 import { useNotifications } from "@hooks/NotificationsContext";
-import { useRedirectionURL } from "@hooks/RedirectionURL";
+import { useQueryParam } from "@hooks/QueryParam";
 import { useRedirector } from "@hooks/Redirector";
-import { useRequestMethod } from "@hooks/RequestMethod";
+import { useRouterNavigate } from "@hooks/RouterNavigate";
 import { useAutheliaState } from "@hooks/State";
 import { useUserInfoPOST } from "@hooks/UserInfo";
 import { SecondFactorMethod } from "@models/Methods";
 import { checkSafeRedirection } from "@services/SafeRedirection";
 import { AuthenticationLevel } from "@services/State";
 import LoadingPage from "@views/LoadingPage/LoadingPage";
-import AuthenticatedView from "@views/LoginPortal/AuthenticatedView/AuthenticatedView";
-import FirstFactorForm from "@views/LoginPortal/FirstFactor/FirstFactorForm";
-import SecondFactorForm from "@views/LoginPortal/SecondFactor/SecondFactorForm";
+
+const AuthenticatedView = lazy(() => import("@views/LoginPortal/AuthenticatedView/AuthenticatedView"));
+const FirstFactorForm = lazy(() => import("@views/LoginPortal/FirstFactor/FirstFactorForm"));
+const SecondFactorForm = lazy(() => import("@views/LoginPortal/SecondFactor/SecondFactorForm"));
 
 export interface Props {
     duoSelfEnrollment: boolean;
     rememberMe: boolean;
+
     resetPassword: boolean;
+    resetPasswordCustomURL: string;
 }
 
 const RedirectionErrorMessage =
-    "Redirection was determined to be unsafe and aborted. Ensure the redirection URL is correct.";
+    "Redirection was determined to be unsafe and aborted ensure the redirection URL is correct";
 
 const LoginPortal = function (props: Props) {
-    const navigate = useNavigate();
     const location = useLocation();
-    const redirectionURL = useRedirectionURL();
-    const requestMethod = useRequestMethod();
+    const redirectionURL = useQueryParam(RedirectionURL);
     const { createErrorNotification } = useNotifications();
     const [firstFactorDisabled, setFirstFactorDisabled] = useState(true);
+    const [broadcastRedirect, setBroadcastRedirect] = useState(false);
     const redirector = useRedirector();
+    const { localStorageMethod } = useLocalStorageMethodContext();
+    const { t: translate } = useTranslation();
 
     const [state, fetchState, , fetchStateError] = useAutheliaState();
     const [userInfo, fetchUserInfo, , fetchUserInfoError] = useUserInfoPOST();
     const [configuration, fetchConfiguration, , fetchConfigurationError] = useConfiguration();
 
-    const redirect = useCallback((url: string) => navigate(url), [navigate]);
+    const navigate = useRouterNavigate();
 
     // Fetch the state when portal is mounted.
     useEffect(() => {
@@ -72,23 +79,23 @@ const LoginPortal = function (props: Props) {
     // Display an error when state fetching fails
     useEffect(() => {
         if (fetchStateError) {
-            createErrorNotification("There was an issue fetching the current user state");
+            createErrorNotification(translate("There was an issue retrieving the current user state"));
         }
-    }, [fetchStateError, createErrorNotification]);
+    }, [fetchStateError, createErrorNotification, translate]);
 
     // Display an error when configuration fetching fails
     useEffect(() => {
         if (fetchConfigurationError) {
-            createErrorNotification("There was an issue retrieving global configuration");
+            createErrorNotification(translate("There was an issue retrieving global configuration"));
         }
-    }, [fetchConfigurationError, createErrorNotification]);
+    }, [fetchConfigurationError, createErrorNotification, translate]);
 
     // Display an error when preferences fetching fails
     useEffect(() => {
         if (fetchUserInfoError) {
-            createErrorNotification("There was an issue retrieving user preferences");
+            createErrorNotification(translate("There was an issue retrieving user preferences"));
         }
-    }, [fetchUserInfoError, createErrorNotification]);
+    }, [fetchUserInfoError, createErrorNotification, translate]);
 
     // Redirect to the correct stage if not enough authenticated
     useEffect(() => {
@@ -102,38 +109,38 @@ const LoginPortal = function (props: Props) {
                 ((configuration &&
                     configuration.available_methods.size === 0 &&
                     state.authentication_level >= AuthenticationLevel.OneFactor) ||
-                    state.authentication_level === AuthenticationLevel.TwoFactor)
+                    state.authentication_level === AuthenticationLevel.TwoFactor ||
+                    broadcastRedirect)
             ) {
                 try {
                     const res = await checkSafeRedirection(redirectionURL);
                     if (res && res.ok) {
                         redirector(redirectionURL);
                     } else {
-                        createErrorNotification(RedirectionErrorMessage);
+                        createErrorNotification(translate(RedirectionErrorMessage));
                     }
-                } catch (err) {
-                    createErrorNotification(RedirectionErrorMessage);
+                } catch {
+                    createErrorNotification(translate(RedirectionErrorMessage));
                 }
+
                 return;
             }
 
-            const redirectionSuffix = redirectionURL
-                ? `?rd=${encodeURIComponent(redirectionURL)}${requestMethod ? `&rm=${requestMethod}` : ""}`
-                : "";
-
             if (state.authentication_level === AuthenticationLevel.Unauthenticated) {
                 setFirstFactorDisabled(false);
-                redirect(`${IndexRoute}${redirectionSuffix}`);
+                navigate(IndexRoute);
             } else if (state.authentication_level >= AuthenticationLevel.OneFactor && userInfo && configuration) {
                 if (configuration.available_methods.size === 0) {
-                    redirect(AuthenticatedRoute);
+                    navigate(AuthenticatedRoute, false);
                 } else {
-                    if (userInfo.method === SecondFactorMethod.Webauthn) {
-                        redirect(`${SecondFactorRoute}${SecondFactorWebauthnSubRoute}${redirectionSuffix}`);
-                    } else if (userInfo.method === SecondFactorMethod.MobilePush) {
-                        redirect(`${SecondFactorRoute}${SecondFactorPushSubRoute}${redirectionSuffix}`);
+                    const method = localStorageMethod || userInfo.method;
+
+                    if (method === SecondFactorMethod.WebAuthn) {
+                        navigate(`${SecondFactorRoute}${SecondFactorWebAuthnSubRoute}`);
+                    } else if (method === SecondFactorMethod.MobilePush) {
+                        navigate(`${SecondFactorRoute}${SecondFactorPushSubRoute}`);
                     } else {
-                        redirect(`${SecondFactorRoute}${SecondFactorTOTPSubRoute}${redirectionSuffix}`);
+                        navigate(`${SecondFactorRoute}${SecondFactorTOTPSubRoute}`);
                     }
                 }
             }
@@ -141,14 +148,21 @@ const LoginPortal = function (props: Props) {
     }, [
         state,
         redirectionURL,
-        requestMethod,
-        redirect,
+        navigate,
         userInfo,
         setFirstFactorDisabled,
         configuration,
         createErrorNotification,
         redirector,
+        broadcastRedirect,
+        localStorageMethod,
+        translate,
     ]);
+
+    const handleChannelStateChange = async () => {
+        setBroadcastRedirect(true);
+        fetchState();
+    };
 
     const handleAuthSuccess = async (redirectionURL: string | undefined) => {
         if (redirectionURL) {
@@ -175,15 +189,17 @@ const LoginPortal = function (props: Props) {
                             disabled={firstFactorDisabled}
                             rememberMe={props.rememberMe}
                             resetPassword={props.resetPassword}
+                            resetPasswordCustomURL={props.resetPasswordCustomURL}
                             onAuthenticationStart={() => setFirstFactorDisabled(true)}
                             onAuthenticationFailure={() => setFirstFactorDisabled(false)}
                             onAuthenticationSuccess={handleAuthSuccess}
+                            onChannelStateChange={handleChannelStateChange}
                         />
                     </ComponentOrLoading>
                 }
             />
             <Route
-                path={`${SecondFactorRoute}*`}
+                path={`${SecondFactorRoute}/*`}
                 element={
                     state && userInfo && configuration ? (
                         <SecondFactorForm
@@ -197,15 +213,10 @@ const LoginPortal = function (props: Props) {
                     ) : null
                 }
             />
-            <Route
-                path={AuthenticatedRoute}
-                element={userInfo ? <AuthenticatedView name={userInfo.display_name} /> : null}
-            />
+            <Route path={AuthenticatedRoute} element={userInfo ? <AuthenticatedView userInfo={userInfo} /> : null} />
         </Routes>
     );
 };
-
-export default LoginPortal;
 
 interface ComponentOrLoadingProps {
     ready: boolean;
@@ -223,3 +234,5 @@ function ComponentOrLoading(props: ComponentOrLoadingProps) {
         </Fragment>
     );
 }
+
+export default LoginPortal;

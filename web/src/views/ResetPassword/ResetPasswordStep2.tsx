@@ -1,31 +1,50 @@
-import React, { useState, useCallback, useEffect } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 
-import { Grid, Button, makeStyles } from "@material-ui/core";
+import { Visibility, VisibilityOff } from "@mui/icons-material";
+import { Button, FormControl, IconButton, InputAdornment, Theme } from "@mui/material";
+import Grid from "@mui/material/Grid2";
+import TextField from "@mui/material/TextField";
+import makeStyles from "@mui/styles/makeStyles";
 import classnames from "classnames";
 import { useTranslation } from "react-i18next";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 
-import FixedTextField from "@components/FixedTextField";
+import PasswordMeter from "@components/PasswordMeter";
 import { IndexRoute } from "@constants/Routes";
+import { IdentityToken } from "@constants/SearchParams";
 import { useNotifications } from "@hooks/NotificationsContext";
-import LoginLayout from "@layouts/LoginLayout";
+import { useQueryParam } from "@hooks/QueryParam";
+import MinimalLayout from "@layouts/MinimalLayout";
+import { PasswordPolicyConfiguration, PasswordPolicyMode } from "@models/PasswordPolicy";
+import { getPasswordPolicyConfiguration } from "@services/PasswordPolicyConfiguration";
 import { completeResetPasswordProcess, resetPassword } from "@services/ResetPassword";
-import { extractIdentityToken } from "@utils/IdentityToken";
 
 const ResetPasswordStep2 = function () {
-    const style = useStyles();
-    const location = useLocation();
+    const styles = useStyles();
     const [formDisabled, setFormDisabled] = useState(true);
     const [password1, setPassword1] = useState("");
     const [password2, setPassword2] = useState("");
     const [errorPassword1, setErrorPassword1] = useState(false);
     const [errorPassword2, setErrorPassword2] = useState(false);
     const { createSuccessNotification, createErrorNotification } = useNotifications();
-    const { t: translate } = useTranslation("Portal");
+    const { t: translate } = useTranslation();
     const navigate = useNavigate();
+    const [showPassword, setShowPassword] = useState(false);
+
+    const [pPolicy, setPPolicy] = useState<PasswordPolicyConfiguration>({
+        max_length: 0,
+        min_length: 8,
+        min_score: 0,
+        require_lowercase: false,
+        require_number: false,
+        require_special: false,
+        require_uppercase: false,
+        mode: PasswordPolicyMode.Disabled,
+    });
+
     // Get the token from the query param to give it back to the API when requesting
     // the secret for OTP.
-    const processToken = extractIdentityToken(location.search);
+    const processToken = useQueryParam(IdentityToken);
 
     const completeProcess = useCallback(async () => {
         if (!processToken) {
@@ -37,11 +56,13 @@ const ResetPasswordStep2 = function () {
         try {
             setFormDisabled(true);
             await completeResetPasswordProcess(processToken);
+            const policy = await getPasswordPolicyConfiguration();
+            setPPolicy(policy);
             setFormDisabled(false);
         } catch (err) {
             console.error(err);
             createErrorNotification(
-                translate("There was an issue completing the process. The verification token might have expired"),
+                translate("There was an issue completing the process the verification token might have expired"),
             );
             setFormDisabled(true);
         }
@@ -79,6 +100,10 @@ const ResetPasswordStep2 = function () {
                 createErrorNotification(
                     translate("Your supplied password does not meet the password policy requirements"),
                 );
+            } else if ((err as Error).message.includes("policy")) {
+                createErrorNotification(
+                    translate("Your supplied password does not meet the password policy requirements"),
+                );
             } else {
                 createErrorNotification(translate("There was an issue resetting the password"));
             }
@@ -90,75 +115,94 @@ const ResetPasswordStep2 = function () {
     const handleCancelClick = () => navigate(IndexRoute);
 
     return (
-        <LoginLayout title={translate("Enter new password")} id="reset-password-step2-stage">
-            <Grid container className={style.root} spacing={2}>
-                <Grid item xs={12}>
-                    <FixedTextField
-                        id="password1-textfield"
-                        label={translate("New password")}
-                        variant="outlined"
-                        type="password"
-                        value={password1}
-                        disabled={formDisabled}
-                        onChange={(e) => setPassword1(e.target.value)}
-                        error={errorPassword1}
-                        className={classnames(style.fullWidth)}
-                        autoComplete="new-password"
-                    />
+        <MinimalLayout title={translate("Enter new password")} id="reset-password-step2-stage">
+            <FormControl id={"form-reset-password"}>
+                <Grid container className={styles.root} spacing={2}>
+                    <Grid size={{ xs: 12 }}>
+                        <TextField
+                            id="password1-textfield"
+                            label={translate("New password")}
+                            variant="outlined"
+                            type={showPassword ? "text" : "password"}
+                            value={password1}
+                            disabled={formDisabled}
+                            onChange={(e) => setPassword1(e.target.value)}
+                            error={errorPassword1}
+                            className={classnames(styles.fullWidth)}
+                            autoComplete="new-password"
+                            InputProps={{
+                                endAdornment: (
+                                    <InputAdornment position="end">
+                                        <IconButton
+                                            aria-label="toggle password visibility"
+                                            onClick={(e) => setShowPassword(!showPassword)}
+                                            edge="end"
+                                            size="large"
+                                        >
+                                            {showPassword ? <VisibilityOff></VisibilityOff> : <Visibility></Visibility>}
+                                        </IconButton>
+                                    </InputAdornment>
+                                ),
+                            }}
+                        />
+                        {pPolicy.mode === PasswordPolicyMode.Disabled ? null : (
+                            <PasswordMeter value={password1} policy={pPolicy} />
+                        )}
+                    </Grid>
+                    <Grid size={{ xs: 12 }}>
+                        <TextField
+                            id="password2-textfield"
+                            label={translate("Repeat new password")}
+                            variant="outlined"
+                            type={showPassword ? "text" : "password"}
+                            disabled={formDisabled}
+                            value={password2}
+                            onChange={(e) => setPassword2(e.target.value)}
+                            error={errorPassword2}
+                            onKeyDown={(ev) => {
+                                if (ev.key === "Enter") {
+                                    doResetPassword();
+                                    ev.preventDefault();
+                                }
+                            }}
+                            className={classnames(styles.fullWidth)}
+                            autoComplete="new-password"
+                        />
+                    </Grid>
+                    <Grid size={{ xs: 6 }}>
+                        <Button
+                            id="reset-button"
+                            variant="contained"
+                            color="primary"
+                            name="password1"
+                            disabled={formDisabled}
+                            onClick={handleResetClick}
+                            className={styles.fullWidth}
+                        >
+                            {translate("Reset")}
+                        </Button>
+                    </Grid>
+                    <Grid size={{ xs: 6 }}>
+                        <Button
+                            id="cancel-button"
+                            variant="contained"
+                            color="primary"
+                            name="password2"
+                            onClick={handleCancelClick}
+                            className={styles.fullWidth}
+                        >
+                            {translate("Cancel")}
+                        </Button>
+                    </Grid>
                 </Grid>
-                <Grid item xs={12}>
-                    <FixedTextField
-                        id="password2-textfield"
-                        label={translate("Repeat new password")}
-                        variant="outlined"
-                        type="password"
-                        disabled={formDisabled}
-                        value={password2}
-                        onChange={(e) => setPassword2(e.target.value)}
-                        error={errorPassword2}
-                        onKeyPress={(ev) => {
-                            if (ev.key === "Enter") {
-                                doResetPassword();
-                                ev.preventDefault();
-                            }
-                        }}
-                        className={classnames(style.fullWidth)}
-                        autoComplete="new-password"
-                    />
-                </Grid>
-                <Grid item xs={6}>
-                    <Button
-                        id="reset-button"
-                        variant="contained"
-                        color="primary"
-                        name="password1"
-                        disabled={formDisabled}
-                        onClick={handleResetClick}
-                        className={style.fullWidth}
-                    >
-                        {translate("Reset")}
-                    </Button>
-                </Grid>
-                <Grid item xs={6}>
-                    <Button
-                        id="cancel-button"
-                        variant="contained"
-                        color="primary"
-                        name="password2"
-                        onClick={handleCancelClick}
-                        className={style.fullWidth}
-                    >
-                        {translate("Cancel")}
-                    </Button>
-                </Grid>
-            </Grid>
-        </LoginLayout>
+            </FormControl>
+        </MinimalLayout>
     );
 };
 
 export default ResetPasswordStep2;
 
-const useStyles = makeStyles((theme) => ({
+const useStyles = makeStyles((theme: Theme) => ({
     root: {
         marginTop: theme.spacing(2),
         marginBottom: theme.spacing(2),

@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"github.com/valyala/fasthttp"
 
 	"github.com/authelia/authelia/v4/internal/authentication"
 	"github.com/authelia/authelia/v4/internal/mocks"
@@ -27,12 +28,13 @@ func (s *StateGetSuite) TearDownTest() {
 }
 
 func (s *StateGetSuite) TestShouldReturnUsernameFromSession() {
-	userSession := s.mock.Ctx.GetSession()
-	userSession.Username = "username"
-	err := s.mock.Ctx.SaveSession(userSession)
-	require.NoError(s.T(), err)
+	userSession, err := s.mock.Ctx.GetSession()
+	s.Assert().NoError(err)
 
-	StateGet(s.mock.Ctx)
+	userSession.Username = "username"
+	s.Assert().NoError(s.mock.Ctx.SaveSession(userSession))
+
+	StateGET(s.mock.Ctx)
 
 	type Response struct {
 		Status string
@@ -43,7 +45,7 @@ func (s *StateGetSuite) TestShouldReturnUsernameFromSession() {
 		Status: "OK",
 		Data: StateResponse{
 			Username:              "username",
-			DefaultRedirectionURL: "",
+			DefaultRedirectionURL: "https://www.example.com",
 			AuthenticationLevel:   authentication.NotAuthenticated,
 		},
 	}
@@ -51,18 +53,20 @@ func (s *StateGetSuite) TestShouldReturnUsernameFromSession() {
 
 	err = json.Unmarshal(s.mock.Ctx.Response.Body(), &actualBody)
 	require.NoError(s.T(), err)
-	assert.Equal(s.T(), 200, s.mock.Ctx.Response.StatusCode())
-	assert.Equal(s.T(), []byte("application/json"), s.mock.Ctx.Response.Header.ContentType())
+	assert.Equal(s.T(), fasthttp.StatusOK, s.mock.Ctx.Response.StatusCode())
+	assert.Equal(s.T(), []byte("application/json; charset=utf-8"), s.mock.Ctx.Response.Header.ContentType())
 	assert.Equal(s.T(), expectedBody, actualBody)
 }
 
 func (s *StateGetSuite) TestShouldReturnAuthenticationLevelFromSession() {
-	userSession := s.mock.Ctx.GetSession()
+	userSession, err := s.mock.Ctx.GetSession()
+	s.Assert().NoError(err)
+
 	userSession.AuthenticationLevel = authentication.OneFactor
-	err := s.mock.Ctx.SaveSession(userSession)
+	s.Assert().NoError(s.mock.Ctx.SaveSession(userSession))
 	require.NoError(s.T(), err)
 
-	StateGet(s.mock.Ctx)
+	StateGET(s.mock.Ctx)
 
 	type Response struct {
 		Status string
@@ -73,7 +77,7 @@ func (s *StateGetSuite) TestShouldReturnAuthenticationLevelFromSession() {
 		Status: "OK",
 		Data: StateResponse{
 			Username:              "",
-			DefaultRedirectionURL: "",
+			DefaultRedirectionURL: "https://www.example.com",
 			AuthenticationLevel:   authentication.OneFactor,
 		},
 	}
@@ -81,8 +85,8 @@ func (s *StateGetSuite) TestShouldReturnAuthenticationLevelFromSession() {
 
 	err = json.Unmarshal(s.mock.Ctx.Response.Body(), &actualBody)
 	require.NoError(s.T(), err)
-	assert.Equal(s.T(), 200, s.mock.Ctx.Response.StatusCode())
-	assert.Equal(s.T(), []byte("application/json"), s.mock.Ctx.Response.Header.ContentType())
+	assert.Equal(s.T(), fasthttp.StatusOK, s.mock.Ctx.Response.StatusCode())
+	assert.Equal(s.T(), []byte("application/json; charset=utf-8"), s.mock.Ctx.Response.Header.ContentType())
 	assert.Equal(s.T(), expectedBody, actualBody)
 }
 

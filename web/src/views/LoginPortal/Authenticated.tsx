@@ -1,28 +1,31 @@
 import React from "react";
 
-import { Typography, makeStyles } from "@material-ui/core";
+import { Box, Theme, Typography } from "@mui/material";
+import makeStyles from "@mui/styles/makeStyles";
 import { useTranslation } from "react-i18next";
 
 import SuccessIcon from "@components/SuccessIcon";
 
 const Authenticated = function () {
-    const classes = useStyles();
-    const { t: translate } = useTranslation("Portal");
+    const { t: translate } = useTranslation();
+
+    const styles = useStyles();
+
     return (
-        <div id="authenticated-stage">
-            <div className={classes.iconContainer}>
+        <Box id="authenticated-stage">
+            <Box className={styles.iconContainer}>
                 <SuccessIcon />
-            </div>
+            </Box>
             <Typography>{translate("Authenticated")}</Typography>
-        </div>
+        </Box>
     );
 };
 
-export default Authenticated;
-
-const useStyles = makeStyles((theme) => ({
+const useStyles = makeStyles((theme: Theme) => ({
     iconContainer: {
         marginBottom: theme.spacing(2),
         flex: "0 0 100%",
     },
 }));
+
+export default Authenticated;

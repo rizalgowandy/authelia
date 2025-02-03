@@ -1,4 +1,8 @@
-_site
-.sass-cache
-.jekyll-metadata
-.jekyll-cache
+.eslintcache
+.stylelintcache
+.netlify
+.hugo_build.lock
+yarn-error.log
+node_modules
+public
+resources

@@ -1,10 +1,16 @@
 package model
 
 import (
+	"context"
+	"database/sql"
 	"database/sql/driver"
 	"encoding/base64"
 	"fmt"
 	"net"
+
+	"github.com/authelia/authelia/v4/internal/clock"
+	"github.com/authelia/authelia/v4/internal/random"
+	"github.com/authelia/authelia/v4/internal/utils"
 )
 
 // NewIP easily constructs a new IP.
@@ -46,7 +52,7 @@ func (ip IP) Value() (value driver.Value, err error) {
 }
 
 // Scan is the IP implementation of the sql.Scanner.
-func (ip *IP) Scan(src interface{}) (err error) {
+func (ip *IP) Scan(src any) (err error) {
 	if src == nil {
 		return fmt.Errorf(errFmtScanNil, ip)
 	}
@@ -82,7 +88,7 @@ func (ip NullIP) Value() (value driver.Value, err error) {
 }
 
 // Scan is the NullIP implementation of the sql.Scanner.
-func (ip *NullIP) Scan(src interface{}) (err error) {
+func (ip *NullIP) Scan(src any) (err error) {
 	if src == nil {
 		ip.IP = nil
 		return nil
@@ -125,7 +131,7 @@ func (b Base64) Value() (value driver.Value, err error) {
 }
 
 // Scan is the Base64 implementation of the sql.Scanner.
-func (b *Base64) Scan(src interface{}) (err error) {
+func (b *Base64) Scan(src any) (err error) {
 	if src == nil {
 		return fmt.Errorf(errFmtScanNil, b)
 	}
@@ -149,4 +155,36 @@ func (b *Base64) Scan(src interface{}) (err error) {
 // StartupCheck represents a provider that has a startup check.
 type StartupCheck interface {
 	StartupCheck() (err error)
+}
+
+// StringSlicePipeDelimited is a string slice that is stored in the database delimited by pipes.
+type StringSlicePipeDelimited []string
+
+// Scan is the StringSlicePipeDelimited implementation of the sql.Scanner.
+func (s *StringSlicePipeDelimited) Scan(value any) (err error) {
+	var nullStr sql.NullString
+
+	if err = nullStr.Scan(value); err != nil {
+		return err
+	}
+
+	if nullStr.Valid {
+		*s = utils.StringSplitDelimitedEscaped(nullStr.String, '|')
+	}
+
+	return nil
+}
+
+// Value is the StringSlicePipeDelimited implementation of the databases/sql driver.Valuer.
+func (s StringSlicePipeDelimited) Value() (driver.Value, error) {
+	return utils.StringJoinDelimitedEscaped(s, '|'), nil
+}
+
+// Context is a commonly used context.Context within Authelia.
+type Context interface {
+	context.Context
+
+	GetClock() clock.Provider
+	RemoteIP() net.IP
+	GetRandom() random.Provider
 }

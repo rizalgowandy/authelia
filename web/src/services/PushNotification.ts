@@ -1,19 +1,23 @@
 import {
+    CompleteDuoDeviceSelectionPath,
     CompletePushNotificationSignInPath,
     InitiateDuoDeviceSelectionPath,
-    CompleteDuoDeviceSelectionPath,
 } from "@services/Api";
 import { Get, PostWithOptionalResponse } from "@services/Client";
 
-interface CompletePushSigninBody {
+interface CompletePushSignInBody {
     targetURL?: string;
+    workflow?: string;
+    workflowID?: string;
 }
 
-export function completePushNotificationSignIn(targetURL: string | undefined) {
-    const body: CompletePushSigninBody = {};
-    if (targetURL) {
-        body.targetURL = targetURL;
-    }
+export function completePushNotificationSignIn(targetURL?: string, workflow?: string, workflowID?: string) {
+    const body: CompletePushSignInBody = {
+        targetURL: targetURL,
+        workflow: workflow,
+        workflowID: workflowID,
+    };
+
     return PostWithOptionalResponse<DuoSignInResponse>(CompletePushNotificationSignInPath, body);
 }
 
@@ -35,6 +39,7 @@ export interface DuoDevice {
     display_name: string;
     capabilities: string[];
 }
+
 export async function initiateDuoDeviceSelectionProcess() {
     return Get<DuoDevicesGetResponse>(InitiateDuoDeviceSelectionPath);
 }
@@ -43,6 +48,7 @@ export interface DuoDevicePostRequest {
     device: string;
     method: string;
 }
+
 export async function completeDuoDeviceSelectionProcess(device: DuoDevicePostRequest) {
     return PostWithOptionalResponse(CompleteDuoDeviceSelectionPath, { device: device.device, method: device.method });
 }

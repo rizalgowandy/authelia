@@ -3,21 +3,25 @@ package mocks
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"testing"
 	"time"
 
-	"github.com/golang/mock/gomock"
 	"github.com/sirupsen/logrus"
 	"github.com/sirupsen/logrus/hooks/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/valyala/fasthttp"
+	"go.uber.org/mock/gomock"
 
 	"github.com/authelia/authelia/v4/internal/authorization"
+	"github.com/authelia/authelia/v4/internal/clock"
 	"github.com/authelia/authelia/v4/internal/configuration/schema"
 	"github.com/authelia/authelia/v4/internal/middlewares"
+	"github.com/authelia/authelia/v4/internal/random"
 	"github.com/authelia/authelia/v4/internal/regulation"
 	"github.com/authelia/authelia/v4/internal/session"
+	"github.com/authelia/authelia/v4/internal/templates"
 )
 
 // MockAutheliaCtx a mock of AutheliaCtx.
@@ -32,65 +36,153 @@ type MockAutheliaCtx struct {
 	StorageMock      *MockStorage
 	NotifierMock     *MockNotifier
 	TOTPMock         *MockTOTP
+	RandomMock       *MockRandom
 
-	UserSession *session.UserSession
-
-	Clock TestingClock
-}
-
-// TestingClock implementation of clock for tests.
-type TestingClock struct {
-	now time.Time
-}
-
-// Now return the stored clock.
-func (dc *TestingClock) Now() time.Time {
-	return dc.now
-}
-
-// After return a channel receiving the time after duration has elapsed.
-func (dc *TestingClock) After(d time.Duration) <-chan time.Time {
-	return time.After(d)
-}
-
-// Set set the time of the clock.
-func (dc *TestingClock) Set(now time.Time) {
-	dc.now = now
+	Clock clock.Fixed
 }
 
 // NewMockAutheliaCtx create an instance of AutheliaCtx mock.
 func NewMockAutheliaCtx(t *testing.T) *MockAutheliaCtx {
 	mockAuthelia := new(MockAutheliaCtx)
-	mockAuthelia.Clock = TestingClock{}
+	mockAuthelia.Clock = clock.Fixed{}
 
 	datetime, _ := time.Parse("2006-Jan-02", "2013-Feb-03")
 	mockAuthelia.Clock.Set(datetime)
 
-	configuration := schema.Configuration{}
-	configuration.Session.RememberMeDuration = schema.DefaultSessionConfiguration.RememberMeDuration
-	configuration.Session.Name = "authelia_session"
-	configuration.AccessControl.DefaultPolicy = "deny"
-	configuration.AccessControl.Rules = []schema.ACLRule{{
-		Domains: []string{"bypass.example.com"},
-		Policy:  "bypass",
-	}, {
-		Domains: []string{"one-factor.example.com"},
-		Policy:  "one_factor",
-	}, {
-		Domains: []string{"two-factor.example.com"},
-		Policy:  "two_factor",
-	}, {
-		Domains: []string{"deny.example.com"},
-		Policy:  "deny",
-	}, {
-		Domains:  []string{"admin.example.com"},
-		Policy:   "two_factor",
-		Subjects: [][]string{{"group:admin"}},
-	}, {
-		Domains:  []string{"grafana.example.com"},
-		Policy:   "two_factor",
-		Subjects: [][]string{{"group:grafana"}},
-	}}
+	config := schema.Configuration{}
+
+	config.Session.Cookies = []schema.SessionCookie{
+		{
+			SessionCookieCommon: schema.SessionCookieCommon{
+				Name:       "authelia_session",
+				RememberMe: schema.DefaultSessionConfiguration.RememberMe,
+				Expiration: schema.DefaultSessionConfiguration.Expiration,
+			},
+			Domain:                "example.com",
+			DefaultRedirectionURL: &url.URL{Scheme: "https", Host: "www.example.com"},
+		},
+		{
+			SessionCookieCommon: schema.SessionCookieCommon{
+				Name:       "authelia_session",
+				RememberMe: schema.DefaultSessionConfiguration.RememberMe,
+				Expiration: schema.DefaultSessionConfiguration.Expiration,
+			},
+			Domain:                "example2.com",
+			DefaultRedirectionURL: &url.URL{Scheme: "https", Host: "www.example2.com"},
+		},
+	}
+
+	config.AuthenticationBackend.RefreshInterval = schema.NewRefreshIntervalDuration(schema.RefreshIntervalDefault)
+	config.AccessControl = schema.AccessControl{
+		DefaultPolicy: "deny",
+		Rules: []schema.AccessControlRule{
+			{
+				Domains: []string{"bypass.example.com"},
+				Policy:  "bypass",
+			},
+			{
+				Domains: []string{"bypass-get.example.com"},
+				Policy:  "bypass",
+				Methods: []string{fasthttp.MethodGet},
+			},
+			{
+				Domains: []string{"bypass-head.example.com"},
+				Policy:  "bypass",
+				Methods: []string{fasthttp.MethodHead},
+			},
+			{
+				Domains: []string{"bypass-options.example.com"},
+				Policy:  "bypass",
+				Methods: []string{fasthttp.MethodOptions},
+			},
+			{
+				Domains: []string{"bypass-trace.example.com"},
+				Policy:  "bypass",
+				Methods: []string{fasthttp.MethodTrace},
+			},
+			{
+				Domains: []string{"bypass-put.example.com"},
+				Policy:  "bypass",
+				Methods: []string{fasthttp.MethodPut},
+			},
+			{
+				Domains: []string{"bypass-patch.example.com"},
+				Policy:  "bypass",
+				Methods: []string{fasthttp.MethodPatch},
+			},
+			{
+				Domains: []string{"bypass-post.example.com"},
+				Policy:  "bypass",
+				Methods: []string{fasthttp.MethodPost},
+			},
+			{
+				Domains: []string{"bypass-delete.example.com"},
+				Policy:  "bypass",
+				Methods: []string{fasthttp.MethodDelete},
+			},
+			{
+				Domains: []string{"bypass-connect.example.com"},
+				Policy:  "bypass",
+				Methods: []string{fasthttp.MethodConnect},
+			},
+			{
+				Domains: []string{
+					"bypass-get.example.com", "bypass-head.example.com", "bypass-options.example.com",
+					"bypass-trace.example.com", "bypass-put.example.com", "bypass-patch.example.com",
+					"bypass-post.example.com", "bypass-delete.example.com", "bypass-connect.example.com",
+				},
+				Policy: "one_factor",
+			},
+			{
+				Domains: []string{"one-factor.example.com"},
+				Policy:  "one_factor",
+			},
+			{
+				Domains: []string{"two-factor.example.com"},
+				Policy:  "two_factor",
+			},
+			{
+				Domains: []string{"deny.example.com"},
+				Policy:  "deny",
+			},
+			{
+				Domains:  []string{"admin.example.com"},
+				Policy:   "two_factor",
+				Subjects: [][]string{{"group:admin"}},
+			},
+			{
+				Domains:  []string{"grafana.example.com"},
+				Policy:   "two_factor",
+				Subjects: [][]string{{"group:grafana"}},
+			},
+			{
+				Domains: []string{"bypass.example2.com"},
+				Policy:  "bypass",
+			},
+			{
+				Domains: []string{"one-factor.example2.com"},
+				Policy:  "one_factor",
+			},
+			{
+				Domains: []string{"two-factor.example2.com"},
+				Policy:  "two_factor",
+			},
+			{
+				Domains: []string{"deny.example2.com"},
+				Policy:  "deny",
+			},
+			{
+				Domains:  []string{"admin.example2.com"},
+				Policy:   "two_factor",
+				Subjects: [][]string{{"group:admin"}},
+			},
+			{
+				Domains:  []string{"grafana.example2.com"},
+				Policy:   "two_factor",
+				Subjects: [][]string{{"group:grafana"}},
+			},
+		},
+	}
 
 	providers := middlewares.Providers{}
 
@@ -105,22 +197,35 @@ func NewMockAutheliaCtx(t *testing.T) *MockAutheliaCtx {
 	providers.Notifier = mockAuthelia.NotifierMock
 
 	providers.Authorizer = authorization.NewAuthorizer(
-		&configuration)
+		&config)
 
 	providers.SessionProvider = session.NewProvider(
-		configuration.Session, nil)
+		config.Session, nil)
 
-	providers.Regulator = regulation.NewRegulator(configuration.Regulation, providers.StorageProvider, &mockAuthelia.Clock)
+	providers.Regulator = regulation.NewRegulator(config.Regulation, providers.StorageProvider, &mockAuthelia.Clock)
 
 	mockAuthelia.TOTPMock = NewMockTOTP(mockAuthelia.Ctrl)
 	providers.TOTP = mockAuthelia.TOTPMock
+
+	mockAuthelia.RandomMock = NewMockRandom(mockAuthelia.Ctrl)
+
+	providers.Random = random.NewMathematical()
+
+	var err error
+
+	if providers.Templates, err = templates.New(templates.Config{}); err != nil {
+		panic(err)
+	}
 
 	request := &fasthttp.RequestCtx{}
 	// Set a cookie to identify this client throughout the test.
 	// request.Request.Header.SetCookie("authelia_session", "client_cookie").
 
-	autheliaCtx, _ := middlewares.NewAutheliaCtx(request, configuration, providers)
-	mockAuthelia.Ctx = autheliaCtx
+	// Set X-Forwarded-Host for compatibility with multi-root-domain implementation.
+	request.Request.Header.Set(fasthttp.HeaderXForwardedHost, "example.com")
+
+	ctx := middlewares.NewAutheliaCtx(request, config, providers)
+	mockAuthelia.Ctx = ctx
 
 	logger, hook := test.NewNullLogger()
 	mockAuthelia.Hook = hook
@@ -152,21 +257,40 @@ func (m *MockAutheliaCtx) SetRequestBody(t *testing.T, body interface{}) {
 	m.Ctx.Request.SetBody(bodyBytes)
 }
 
+// AssertKO assert an error response from the service.
+func (m *MockAutheliaCtx) AssertKO(t *testing.T, message string, code int) {
+	assert.Equal(t, code, m.Ctx.Response.StatusCode())
+	assert.Equal(t, fmt.Sprintf("{\"status\":\"KO\",\"message\":\"%s\"}", message), string(m.Ctx.Response.Body()))
+}
+
 // Assert401KO assert an error response from the service.
 func (m *MockAutheliaCtx) Assert401KO(t *testing.T, message string) {
-	assert.Equal(t, 401, m.Ctx.Response.StatusCode())
-	assert.Equal(t, fmt.Sprintf("{\"status\":\"KO\",\"message\":\"%s\"}", message), string(m.Ctx.Response.Body()))
+	m.AssertKO(t, message, fasthttp.StatusUnauthorized)
+}
+
+// Assert403KO assert an error response from the service.
+func (m *MockAutheliaCtx) Assert403KO(t *testing.T, message string) {
+	m.AssertKO(t, message, fasthttp.StatusForbidden)
+}
+
+// Assert404KO assert an error response from the service.
+func (m *MockAutheliaCtx) Assert404KO(t *testing.T, message string) {
+	m.AssertKO(t, message, fasthttp.StatusNotFound)
+}
+
+// Assert500KO assert an error response from the service.
+func (m *MockAutheliaCtx) Assert500KO(t *testing.T, message string) {
+	m.AssertKO(t, message, fasthttp.StatusInternalServerError)
 }
 
 // Assert200KO assert an error response from the service.
 func (m *MockAutheliaCtx) Assert200KO(t *testing.T, message string) {
-	assert.Equal(t, 200, m.Ctx.Response.StatusCode())
-	assert.Equal(t, fmt.Sprintf("{\"status\":\"KO\",\"message\":\"%s\"}", message), string(m.Ctx.Response.Body()))
+	m.AssertKO(t, message, fasthttp.StatusOK)
 }
 
 // Assert200OK assert a successful response from the service.
 func (m *MockAutheliaCtx) Assert200OK(t *testing.T, data interface{}) {
-	assert.Equal(t, 200, m.Ctx.Response.StatusCode())
+	assert.Equal(t, fasthttp.StatusOK, m.Ctx.Response.StatusCode())
 
 	response := middlewares.OKResponse{
 		Status: "OK",

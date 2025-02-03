@@ -14,12 +14,11 @@ type ResetPasswordScenario struct {
 }
 
 func NewResetPasswordScenario() *ResetPasswordScenario {
-	return &ResetPasswordScenario{RodSuite: new(RodSuite)}
+	return &ResetPasswordScenario{RodSuite: NewRodSuite("")}
 }
 
 func (s *ResetPasswordScenario) SetupSuite() {
-	browser, err := StartRod()
-
+	browser, err := NewRodSession(RodSessionWithCredentials(s))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -52,18 +51,18 @@ func (s *ResetPasswordScenario) TestShouldResetPassword() {
 		s.collectScreenshot(ctx.Err(), s.Page)
 	}()
 
-	s.doVisit(s.T(), s.Context(ctx), GetLoginBaseURL())
+	s.doVisit(s.T(), s.Context(ctx), GetLoginBaseURL(BaseDomain))
 	s.verifyIsFirstFactorPage(s.T(), s.Context(ctx))
 
 	// Reset the password to abc.
 	s.doResetPassword(s.T(), s.Context(ctx), "john", "abc", "abc", false)
 
 	// Try to login with the old password.
-	s.doLoginOneFactor(s.T(), s.Context(ctx), "john", "password", false, "")
-	s.verifyNotificationDisplayed(s.T(), s.Context(ctx), "Incorrect username or password.")
+	s.doLoginOneFactor(s.T(), s.Context(ctx), "john", "password", false, BaseDomain, "")
+	s.verifyNotificationDisplayed(s.T(), s.Context(ctx), "Incorrect username or password")
 
 	// Try to login with the new password.
-	s.doLoginOneFactor(s.T(), s.Context(ctx), "john", "abc", false, "")
+	s.doLoginOneFactor(s.T(), s.Context(ctx), "john", "abc", false, BaseDomain, "")
 
 	// Logout.
 	s.doLogout(s.T(), s.Context(ctx))
@@ -79,7 +78,7 @@ func (s *ResetPasswordScenario) TestShouldMakeAttackerThinkPasswordResetIsInitia
 		s.collectScreenshot(ctx.Err(), s.Page)
 	}()
 
-	s.doVisit(s.T(), s.Context(ctx), GetLoginBaseURL())
+	s.doVisit(s.T(), s.Context(ctx), GetLoginBaseURL(BaseDomain))
 	s.verifyIsFirstFactorPage(s.T(), s.Context(ctx))
 
 	// Try to initiate a password reset of an nonexistent user.
@@ -89,6 +88,23 @@ func (s *ResetPasswordScenario) TestShouldMakeAttackerThinkPasswordResetIsInitia
 	s.verifyMailNotificationDisplayed(s.T(), s.Context(ctx))
 }
 
+func (s *ResetPasswordScenario) TestShouldNotifyUserOnBlankUsername() {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer func() {
+		cancel()
+		s.collectScreenshot(ctx.Err(), s.Page)
+	}()
+
+	s.doVisit(s.T(), s.Context(ctx), GetLoginBaseURL(BaseDomain))
+	s.verifyIsFirstFactorPage(s.T(), s.Context(ctx))
+
+	s.doInitiatePasswordReset(s.T(), s.Context(ctx), "")
+
+	s.verifyNotificationDisplayed(s.T(), s.Context(ctx), "Username is required")
+
+	s.VerifyPageElementAttributeValueBoolean(s.T(), s.Context(ctx), "username-textfield", "aria-invalid", true, true)
+}
+
 func (s *ResetPasswordScenario) TestShouldLetUserNoticeThereIsAPasswordMismatch() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer func() {
@@ -96,14 +112,14 @@ func (s *ResetPasswordScenario) TestShouldLetUserNoticeThereIsAPasswordMismatch(
 		s.collectScreenshot(ctx.Err(), s.Page)
 	}()
 
-	s.doVisit(s.T(), s.Context(ctx), GetLoginBaseURL())
+	s.doVisit(s.T(), s.Context(ctx), GetLoginBaseURL(BaseDomain))
 	s.verifyIsFirstFactorPage(s.T(), s.Context(ctx))
 
 	s.doInitiatePasswordReset(s.T(), s.Context(ctx), "john")
 	s.verifyMailNotificationDisplayed(s.T(), s.Context(ctx))
 
 	s.doCompletePasswordReset(s.T(), s.Context(ctx), "password", "another_password")
-	s.verifyNotificationDisplayed(s.T(), s.Context(ctx), "Passwords do not match.")
+	s.verifyNotificationDisplayed(s.T(), s.Context(ctx), "Passwords do not match")
 }
 
 func TestRunResetPasswordScenario(t *testing.T) {

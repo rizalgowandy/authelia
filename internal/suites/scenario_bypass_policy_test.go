@@ -16,13 +16,12 @@ type BypassPolicyScenario struct {
 
 func NewBypassPolicyScenario() *BypassPolicyScenario {
 	return &BypassPolicyScenario{
-		RodSuite: new(RodSuite),
+		RodSuite: NewRodSuite(""),
 	}
 }
 
 func (s *BypassPolicyScenario) SetupSuite() {
-	browser, err := StartRod()
-
+	browser, err := NewRodSession(RodSessionWithCredentials(s))
 	if err != nil {
 		log.Fatal(err)
 	}

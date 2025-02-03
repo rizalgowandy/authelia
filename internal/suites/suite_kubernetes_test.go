@@ -11,15 +11,17 @@ type KubernetesSuite struct {
 }
 
 func NewKubernetesSuite() *KubernetesSuite {
-	return &KubernetesSuite{RodSuite: new(RodSuite)}
+	return &KubernetesSuite{
+		RodSuite: NewRodSuite(kubernetesSuiteName),
+	}
 }
 
-func (s *KubernetesSuite) TestOneFactorScenario() {
-	suite.Run(s.T(), NewOneFactorScenario())
+func (s *KubernetesSuite) Test1FAScenario() {
+	suite.Run(s.T(), New1FAScenario())
 }
 
-func (s *KubernetesSuite) TestTwoFactorScenario() {
-	suite.Run(s.T(), NewTwoFactorScenario())
+func (s *KubernetesSuite) Test2FATOTPScenario() {
+	suite.Run(s.T(), New2FATOTPScenario())
 }
 
 func (s *KubernetesSuite) TestRedirectionURLScenario() {

@@ -3,14 +3,20 @@
 set +u
 
 declare -A BUILDS=(["linux"]="amd64 arm arm64 amd64-musl arm-musl arm64-musl" ["freebsd"]="amd64")
-DOCKER_IMAGE=authelia/authelia
+DOCKER_IMAGE=authelia:dist
 
 if [[ "${BUILDKITE_LABEL}" == ":hammer_and_wrench: Unit Test" ]]; then
   if [[ ! "${BUILDKITE_BRANCH}" =~ ^renovate/ ]]; then
     echo "--- :docker: Saving artifacts for :buildkite: :docker: :github: releases"
     for OS in "${!BUILDS[@]}"; do
       for ARCH in ${BUILDS[$OS]}; do
-        tar -czf "authelia-${OS}-${ARCH}.tar.gz" "authelia-${OS}-${ARCH}" authelia.service config.template.yml
+        if [[ ${OS} == linux ]]; then
+          tar -czf "authelia-${OS}-${ARCH}.tar.gz" "authelia-${OS}-${ARCH}" authelia.service config.template.yml
+        elif [[ ${OS} == freebsd ]]; then
+          tar -czf "authelia-${OS}-${ARCH}.tar.gz" "authelia-${OS}-${ARCH}" authelia-fb-rc.d config.template.yml
+        else
+          echo "${OS} not packaged!"
+        fi
         sha256sum "authelia-${OS}-${ARCH}.tar.gz" > "authelia-${OS}-${ARCH}.tar.gz.sha256"
       done
     done
@@ -21,7 +27,6 @@ if [[ "${BUILDKITE_LABEL}" == ":hammer_and_wrench: Unit Test" ]]; then
 fi
 
 if [[ "${BUILDKITE_LABEL}" == ":docker: Build Image [coverage]" ]]; then
-  # Saving image for docker push
   docker save "${DOCKER_IMAGE}" | zstdmt -T0 -12 > "authelia-image-coverage.tar.zst"
 fi
 

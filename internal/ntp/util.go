@@ -3,19 +3,17 @@ package ntp
 import "time"
 
 // ntpLeapVersionClientMode does the mathematics to configure the leap/version/mode value of an NTP client packet.
-func ntpLeapVersionClientMode(leap bool, version ntpVersion) (lvm uint8) {
-	lvm = ntpClientModeValue
-
-	if leap {
-		lvm += ntpLeapEnabledValue
-	}
+func ntpLeapVersionClientMode(version ntpVersion) (lvm uint8) {
+	lvm = (lvm & maskMode) | uint8(modeClient)
 
 	switch version {
 	case ntpV3:
-		lvm += ntpVersion3Value
+		lvm = (lvm & maskVersion) | uint8(version3)<<3
 	case ntpV4:
-		lvm += ntpVersion4Value
+		lvm = (lvm & maskVersion) | uint8(version4)<<3
 	}
+
+	lvm = (lvm & maskLeap) | uint8(leapUnknown)<<6
 
 	return lvm
 }
@@ -39,4 +37,12 @@ func ntpIsOffsetTooLarge(maxOffset time.Duration, first, second time.Time) (tooL
 	}
 
 	return offset > maxOffset
+}
+
+func calcOffset(first, second time.Time) time.Duration {
+	if first.After(second) {
+		return first.Sub(second)
+	}
+
+	return second.Sub(first)
 }

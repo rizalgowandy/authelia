@@ -1,7 +1,6 @@
 package suites
 
 import (
-	"fmt"
 	"os"
 	"time"
 )
@@ -23,30 +22,20 @@ func init() {
 		"internal/suites/example/compose/smtp/docker-compose.yml",
 	})
 
-	setup := func(suitePath string) error {
-		if err := dockerEnvironment.Up(); err != nil {
+	setup := func(suitePath string) (err error) {
+		if err = dockerEnvironment.Up(); err != nil {
 			return err
 		}
 
-		return waitUntilAutheliaIsReady(dockerEnvironment, standaloneSuiteName)
+		if err = waitUntilAutheliaIsReady(dockerEnvironment, standaloneSuiteName); err != nil {
+			return err
+		}
+
+		return updateDevEnvFileForDomain(BaseDomain, true)
 	}
 
 	displayAutheliaLogs := func() error {
-		backendLogs, err := dockerEnvironment.Logs("authelia-backend", nil)
-		if err != nil {
-			return err
-		}
-
-		fmt.Println(backendLogs)
-
-		frontendLogs, err := dockerEnvironment.Logs("authelia-frontend", nil)
-		if err != nil {
-			return err
-		}
-
-		fmt.Println(frontendLogs)
-
-		return nil
+		return dockerEnvironment.PrintLogs("authelia-backend", "authelia-frontend")
 	}
 
 	teardown := func(suitePath string) error {
@@ -62,7 +51,7 @@ func init() {
 		OnError:         displayAutheliaLogs,
 		OnSetupTimeout:  displayAutheliaLogs,
 		TearDown:        teardown,
-		TestTimeout:     3 * time.Minute,
+		TestTimeout:     4 * time.Minute,
 		TearDownTimeout: 2 * time.Minute,
 		Description: `This suite is used to test Authelia in a standalone
 configuration with in-memory sessions and a local sqlite db stored on disk`,

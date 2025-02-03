@@ -3,19 +3,30 @@ run:
   timeout: 3m
 
 linters-settings:
+  forbidigo:
+    forbid:
+      - p: ^print.*$
+        msg: Do not commit print statements.
+      - p: ^fmt\.Print.*$
+        pkg: ^fmt$
+        msg: Do not commit print statements.
+    analyze-types: true
   goconst:
     min-len: 2
     min-occurrences: 2
   gocyclo:
     min-complexity: 15
   godot:
-    check-all: true
+    scope: all
   goimports:
     local-prefixes: github.com/authelia/authelia
+  revive:
+    confidence: 0.8
 
 linters:
   enable:
     - asciicheck
+    - forbidigo
     - goconst
     - gocritic
     - gocyclo
@@ -43,6 +54,13 @@ issues:
     - (G104|G307)
     - (Expect directory permissions to be 0750 or less|Expect file permissions to be 0600 or less)
     - Potential file inclusion via variable
+  exclude-rules:
+    - path: internal/commands/
+      linters:
+        - forbidigo
+    - path: cmd/
+      linters:
+        - forbidigo
   exclude-use-default: false
   max-issues-per-linter: 0
   max-same-issues: 0

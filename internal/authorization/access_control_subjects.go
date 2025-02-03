@@ -4,14 +4,9 @@ import (
 	"github.com/authelia/authelia/v4/internal/utils"
 )
 
-// AccessControlSubject abstracts an ACL subject of type `group:` or `user:`.
-type AccessControlSubject interface {
-	IsMatch(subject Subject) (match bool)
-}
-
 // AccessControlSubjects represents an ACL subject.
 type AccessControlSubjects struct {
-	Subjects []AccessControlSubject
+	Subjects []SubjectMatcher
 }
 
 // AddSubject appends to the AccessControlSubjects based on a subject rule string.
@@ -24,7 +19,7 @@ func (acs *AccessControlSubjects) AddSubject(subjectRule string) {
 }
 
 // IsMatch returns true if the ACL subjects match the subject properties.
-func (acs AccessControlSubjects) IsMatch(subject Subject) (match bool) {
+func (acs *AccessControlSubjects) IsMatch(subject Subject) (match bool) {
 	for _, rule := range acs.Subjects {
 		if !rule.IsMatch(subject) {
 			return false
@@ -52,4 +47,15 @@ type AccessControlGroup struct {
 // IsMatch returns true if the AccessControlGroup name matches one of the groups of the Subject.
 func (acg AccessControlGroup) IsMatch(subject Subject) (match bool) {
 	return utils.IsStringInSlice(acg.Name, subject.Groups)
+}
+
+// AccessControlClient represents an ACL subject of type `oauth2:client:`.
+type AccessControlClient struct {
+	Provider string
+	ID       string
+}
+
+// IsMatch returns true if the AccessControlClient name matches one of the groups of the Subject.
+func (acg AccessControlClient) IsMatch(subject Subject) (match bool) {
+	return acg.ID == subject.ClientID
 }
